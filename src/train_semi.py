@@ -23,13 +23,14 @@ torch.backends.cudnn.benchmark = True
 torch.autograd.set_detect_anomaly(True)
 
 params = {
+    'base_dir': '/fast/AG_Kainmueller/jrumber/PhD/semi_supervised_IS',
     #'data': 'data/DSB2018_n0/train/train_data.npz', # DSB data, 10 samples 10 19 38 76 152 
     #'data': 'data/Mouse_n0/train/train_data.npz', # Mouse data, 5 samples 5 10 19 38 76
     'data': 'data/Flywing_n0/train/train_data.npz', # Flywing data, 5 samples 5 10 19 38 76
-    'experiment' : 'exp_0_flywing_seed1_samples10_DINO',
-    'batch_size_labeled': 1,
-    'batch_size_unlabeled': 2,
-    'num_workers': 1,
+    'experiment' : 'exp_0_flywing_seed1_samples10_DINO_dino_loss',
+    'batch_size_labeled': 5,
+    'batch_size_unlabeled': 20,
+    'num_workers': 6,
     'training_steps':300000,
     'in_channels': 1,
     'num_fmaps': 32,
@@ -39,22 +40,20 @@ params = {
     'constant_upsample': False,
     'padding': 'same',
     'activation': 'ReLU',
-    'learning_rate': 1.0e-2,
+    'learning_rate': 2.0e-5,
     'num_annotated' : 10,
     'seed': 1,
-    'checkpoint_path': 'exp_0_flywing_seed1_samples10_pretrained/best_model',
+    'checkpoint_path': '/fast/AG_Kainmueller/jrumber/PhD/semi_supervised_publication/exp_0_flywing_seed1_samples10_pretrained/best_model',
     'projection_loss': True,
-    'proj_loss_weight': 0.1,
+    'proj_loss_weight': 1.,
     'pretrained_model': True,
     'projection_softmax': 'none', # 'pre' projection, 'post' projection or none
-    'projection_loss': 'L1', # 'MSE' or 'COSINE' or 'L1' or DINO
-    'projection_head': 'MLP', # 'DINO', 'MLP' or 'SHALLOW'
+    'projection_loss': 'DINO', # 'MSE' or 'COSINE' or 'L1' or DINO
+    'projection_head': 'DINO', # 'DINO', 'MLP' or 'SHALLOW'
     'trainable_projector': True,
     'embedding_dim': 512,
     'load_student_weights': True, # if False it initiliazes a fresh student model instead of loading one
     'warmup_steps': 0, # during warmup_steps the teacher model doesn't get updated
-    'batchsize_unlabeled': 10,
-    'batchsize_labeled': 2,
     'fast_update_slow_model': True,
     'aug_params': {
         'RandomHorizontalFlip': {'p': 0.25},
@@ -66,6 +65,7 @@ params = {
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 params['device'] = device
+params['data'] = os.path.join(params['base_dir'], params['data'])
 
 X_labeled, Y_labeled, X_unlabeled, X_val, Y_val_masks = prepare_data(params) # BHW
 
@@ -82,14 +82,14 @@ X_labeled, Y_labeled, X_unlabeled, X_val, Y_val_masks = [
 ]
 
 Y_labeled = convert_to_oneHot(Y_labeled)
-Y_labeled = Y_labeled.argmax(-1)
+Y_labeled = Y_labeled.argmax(-1).squeeze(1)
 
 X_val = X_val
 Y_val = convert_to_oneHot(Y_val_masks)
 Y_val = Y_val.argmax(-1).squeeze(1)
 
 def worker_init_fn(worker_id):
-    worker_seed = torch.initial_seed() + worker_id
+    worker_seed = torch.initial_seed() % (2*16) + worker_id
     np.random.seed(worker_seed)
     random.seed(worker_seed)
     torch.manual_seed(worker_seed)
@@ -164,15 +164,19 @@ optimizer = torch.optim.SGD(model.parameters(), lr=params['learning_rate'], mome
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=params['training_steps'], eta_min=1e-5)
 
 s_augment = prep_spatial_aug_fn(params['aug_params'])
-c_augment = prep_intensity_aug_fn(128)
+c_augment = prep_intensity_aug_fn(128, s=0.5)
 loss_weight = torch.Tensor([1.0,1.0,4.0]).to(device)
 
-os.makedirs(os.path.join(params['experiment'],'train','snaps'),exist_ok=True)
-writer_dir = os.path.join(params['experiment'],'train','summary',str(time.time()))
+exp_dir = os.path.join(params['base_dir'], 'experiments', params['experiment'])
+snap_dir = os.path.join(exp_dir,'train','snaps')
+checkpoint_dir = os.path.join(exp_dir,'train','checkpoints')
+writer_dir = os.path.join(exp_dir, 'train','summary',str(time.time()))
+os.makedirs(snap_dir, exist_ok=True)
 os.makedirs(writer_dir,exist_ok=True)
+os.makedirs(checkpoint_dir,exist_ok=True)
 writer = SummaryWriter(writer_dir)
 
-with open(os.path.join(params['experiment'], 'params.toml'), 'w') as f:
+with open(os.path.join(exp_dir, 'params.toml'), 'w') as f:
     toml.dump(params, f)
 
 validation_loss = []
@@ -192,15 +196,41 @@ while True:
         raw_labeled = raw_labeled.to(device)
         raw_unlabeled = raw_unlabeled.to(device)
         
-        pseudo_labels = test_time_aug(raw_unlabeled, slow_model)
+        pseudo_labels = test_time_aug(raw_unlabeled, slow_model, flip=True, rotate=False)
         raw_labeled = DP.Image(raw_labeled)
         raw_unlabeled = DP.Image(raw_unlabeled)
         pseudo_labels = DP.Image(pseudo_labels)
         gt_3c = DP.Mask(gt_3c)
 
-        raw_labeled_aug, raw_unlabeled_aug, gt_3c_aug, pseudo_labels_aug = s_augment(
-            raw_labeled, raw_unlabeled, gt_3c, pseudo_labels
-        )
+        # raw_labeled_aug, raw_unlabeled_aug, gt_3c_aug, pseudo_labels_aug = s_augment(
+        #     raw_labeled, raw_unlabeled, gt_3c, pseudo_labels
+        # )
+        # apply individual transforms on each sample
+        raw_labeled_aug = []
+        raw_unlabeled_aug = []
+        gt_3c_aug = []
+        pseudo_labels_aug = []
+        for raw_labeled_tmp, gt_3c_tmp in zip(raw_labeled, gt_3c):
+            tmp = torch.cat([raw_labeled_tmp, gt_3c_tmp.unsqueeze(0)], dim=0)
+            tmp = s_augment(tmp)
+            raw_labeled_tmp = tmp[:raw_labeled_tmp.shape[0]]
+            gt_3c_tmp = tmp[raw_labeled_tmp.shape[0]:]
+            gt_3c_tmp = gt_3c_tmp.squeeze(0)
+            raw_labeled_aug.append(raw_labeled_tmp)
+            gt_3c_aug.append(gt_3c_tmp)
+        #
+        for raw_unlabeled_tmp, pseudo_labels_tmp in zip(raw_unlabeled, pseudo_labels):
+            tmp = torch.cat([raw_unlabeled_tmp, pseudo_labels_tmp], dim=0)
+            tmp = s_augment(tmp)
+            raw_unlabeled_tmp = tmp[:raw_unlabeled_tmp.shape[0]]
+            pseudo_labels_tmp = tmp[raw_unlabeled_tmp.shape[0]:]
+            raw_unlabeled_aug.append(raw_unlabeled_tmp)
+            pseudo_labels_aug.append(pseudo_labels_tmp)
+        raw_labeled_aug = torch.stack(raw_labeled_aug)
+        raw_unlabeled_aug = torch.stack(raw_unlabeled_aug)
+        gt_3c_aug = torch.stack(gt_3c_aug)
+        pseudo_labels_aug = torch.stack(pseudo_labels_aug)
+
         pseudo_labels_aug_mask = pseudo_labels_aug != 0
         raw_labeled_aug, raw_unlabeled_aug = c_augment(raw_labeled_aug, raw_unlabeled_aug)
         
@@ -224,51 +254,53 @@ while True:
             pseudo_labels_proj = projector(pseudo_labels_aug)
 
         # loss calculation
-        loss_img = loss_fn(
+        proj_loss_img = loss_fn(
             input = out_fast_proj,
             target = pseudo_labels_proj.detach(),
             epoch = step    
         )
-        loss_img = loss_img.mean(1)
+        proj_loss_img = proj_loss_img.mean(1)
         # mask out areas that were padded during augmentation
-        loss_img *= pseudo_labels_aug_mask.any(1).to(float)
+        proj_loss_img *= pseudo_labels_aug_mask.any(1).to(float)
 
-        loss_img *= params['proj_loss_weight']
-        con_loss = loss_img.mean() 
+        con_loss = proj_loss_img.mean() * params['proj_loss_weight']
         writer.add_scalar('aug_con_loss', con_loss.item(), step)
-        loss = con_loss
         
-        loss_img = F.cross_entropy(
+        ce_loss_img = F.cross_entropy(
             input = out_labeled,
             target = gt_3c_aug.squeeze(0).long(), 
             weight = loss_weight,
             reduction = 'none'
         )
-        ce_loss = loss_img.mean()
+        ce_loss_img *= (gt_3c_aug != 0).to(float)
+        ce_loss = ce_loss_img.mean()
         writer.add_scalar('ce_loss', ce_loss.item(), step)
-        loss += ce_loss
-        print('step: ', step, 'loss: ', loss.item())
+        loss = con_loss + ce_loss
+        print('step: ', step, 'aug_con_loss: ', con_loss.item(), 'ce_loss: ', ce_loss.item(), "total loss: ", loss.item())
         loss.backward()
         optimizer.step()
         scheduler.step()
 
         # save snaps
-        if step % 10000 ==0:
+        if step % 1000 ==0:
             # save training snap
             out_dict = {}
             out_dict['raw_labeled'] = raw_labeled_aug[0,...].cpu().detach().numpy()
             out_dict['pred_labeled'] = out_labeled[0,...].softmax(0).squeeze().cpu().detach().numpy()
-            out_dict['label'] = gt_3c_aug[0,...].cpu().detach().numpy()
+            out_dict['label'] = gt_3c_aug[0,...].cpu().unsqueeze(0).detach().numpy()
             out_dict['raw_unlabeled'] = raw_unlabeled_aug[0,...].cpu().detach().numpy()
             out_dict['pseudo_label'] = pseudo_labels_aug[0,...].softmax(0).cpu().detach().numpy()
-            with h5py.File(os.path.join(params['experiment'],'train/snaps/snap_step_'+str(step)+'.hdf'),'w') as f:
+            out_dict['pred_unlabeled'] = out_unlabeled[0,...].softmax(0).squeeze().cpu().detach().numpy()
+            out_dict['ce_loss'] = ce_loss_img[0,...].cpu().unsqueeze(0).detach().numpy()
+            out_dict['con_loss'] = proj_loss_img[0,...].cpu().unsqueeze(0).detach().numpy()
+            with h5py.File(os.path.join(snap_dir,'snap_step_'+str(step)+'.hdf'),'w') as f:
                 for key in list(out_dict.keys()):
                     f.create_dataset(key, data = out_dict[key].astype(np.float32))
         if step % 100 == 0 and step > params['warmup_steps']:
             print('Update Momentum Network')
             for param_slow, param_fast in zip(slow_model.parameters(), model.parameters()):
                 param_slow = 0.99 * param_slow + 0.01 * param_fast
-        if step % 200 == 0:
+        if step % 100 == 0:
             val_loss = []
             val_loss_slow = []
             for raw, gt_3c in validation_dataloader:
@@ -295,9 +327,9 @@ while True:
             print('Validation loss: ', val_new)
             if val_new <= np.min(validation_loss):
                 print('Save best model')
-                save_model(step, model, optimizer, loss, params['experiment']+"/best_model")
+                save_model(step, model, optimizer, loss, os.path.join(checkpoint_dir, "best_model.pth"))
                 if val_new<val_new_slow and params['fast_update_slow_model']:
                     slow_model = copy.deepcopy(model)
             if val_new_slow <= np.min(validation_loss_slow):
                 print('Save best slow model')
-                save_model(step, slow_model, optimizer, loss, params['experiment']+"/best_slow_model")
+                save_model(step, slow_model, optimizer, checkpoint_dir, os.path.join(checkpoint_dir, "best_slow_model.pth"))

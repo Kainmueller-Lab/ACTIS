@@ -28,6 +28,8 @@ aug_params= {
 }
 
 params = {
+    'base_dir': '/fast/AG_Kainmueller/jrumber/PhD/semi_supervised_IS',
+
     #'data': 'data/DSB2018_n0/train/train_data.npz', # DSB data, 10 samples 10 19 38 76 152 
     #'data': 'data/Mouse_n0/train/train_data.npz', # Mouse data, 5 samples 5 10 19 38 76
     'data': 'data/Flywing_n0/train/train_data.npz', # Flywing data, 5 samples 5 10 19 38 76
@@ -50,6 +52,7 @@ params = {
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 params['device'] = device
+params['data'] = os.path.join(params['base_dir'], params['data'])
 
 trainval_data =  np.load(params['data'])
 train_images = trainval_data['X_train'].astype(np.float32)
