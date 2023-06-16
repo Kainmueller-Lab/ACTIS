@@ -35,7 +35,7 @@ def prep_intensity_aug_fn(size, s=0.5):
         transforms.RandomApply([
             transforms.ColorJitter(0.8 * s, 0.8 * s, 0.8 * s, 0.2 * s),
             transforms.GaussianBlur(kernel_size=int(0.01 * size), sigma=(0.2,0.2)),
-            GaussianNoise(0.03)
+            GaussianNoise(0.1*s)
         ], p=0.5),
         ])
     return data_transforms

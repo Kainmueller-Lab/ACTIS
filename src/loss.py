@@ -121,7 +121,7 @@ class DINOLoss(nn.Module):
 
         loss = torch.sum(-teacher_out * F.log_softmax(student_out, dim=1), dim=1) # should be same shape as img
         self.update_center(teacher_output)
-        return loss
+        return loss.unsqueeze(1)
     
     @torch.no_grad()
     def update_center(self, teacher_output):
