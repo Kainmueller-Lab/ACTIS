@@ -1,41 +1,37 @@
-import torch
-import torch.nn.functional as F
-import numpy as np
-from spatial_augmenter import SpatialAugmenter
 import os
-import h5py
+os.environ["OMP_NUM_THREADS"] = "1"
+import torch
 from torch.utils.data import DataLoader
-from unet import UNet
-from torch.utils.tensorboard import SummaryWriter
-from data_utils import *
-import time 
-import matplotlib.pyplot as plt
 import random
+import h5py
+import torch.nn.functional as F
+from data_utils import *
+import numpy as np
+from unet import *
+import copy
+from data_utils import save_model
+from torch.utils.tensorboard import SummaryWriter
+import time
 import segmentation_models_pytorch as smp
 import toml
+from loss import get_projection_loss
+from augmentations import test_time_aug, prep_intensity_aug_fn, prep_spatial_aug_fn
+from torchvision import datapoints as DP
+from projector import prep_projection_head
+from evaluate import calculate_scores
 
 torch.backends.cudnn.benchmark = True
-torch.manual_seed(471)
-
-aug_params= {
-    'mirror': {'prob': 0.5, 'prob_x': 0.25, 'prob_y': 0.25},
-    'translate': {'max_percent':0.1, 'prob': 0.2},
-    'scale': {'min': 0.5, 'max':1.5, 'prob': 0.5},
-    'zoom': {'min': 0.2, 'max':2.0, 'prob': 0.5},
-    'rotate': {'max_degree': 90, 'prob': 0.5},
-    'shear': {'max_percent': 0.2, 'prob': 0.5},
-    'elastic': {'alpha': [120,120], 'sigma': 8, 'prob': 0.75}
-}
+torch.autograd.set_detect_anomaly(True)
 
 params = {
     'base_dir': '/fast/AG_Kainmueller/jrumber/PhD/semi_supervised_IS',
-
-    #'data': 'data/DSB2018_n0/train/train_data.npz', # DSB data, 10 samples 10 19 38 76 152 
-    #'data': 'data/Mouse_n0/train/train_data.npz', # Mouse data, 5 samples 5 10 19 38 76
-    'data': 'data/Flywing_n0/train/train_data.npz', # Flywing data, 5 samples 5 10 19 38 76
-    'experiment' : 'exp_0_flywing_seed1_samples10_pretrained', # flywing sample 10 is missing
-    'batch_size': 10,
-    'training_steps':160000,
+    'data': 'data/DSB2018_n0/train/train_data.npz', # DSB data, 10 samples 10 19 38 76 152 
+    # 'data': 'data/Mouse_n0/train/train_data.npz', # Mouse data, 5 samples 5 10 19 38 76
+    # 'data': 'data/Flywing_n0/train/train_data.npz', # Flywing data, 5 samples 5 10 19 38 76
+    'experiment' : 'exp_0_dsb_seed1_samples10',
+    'batch_size_labeled': 20,
+    'num_workers': 6,
+    'training_steps':100000,
     'in_channels': 1,
     'num_fmaps': 32,
     'fmap_inc_factors': 2,
@@ -44,80 +40,68 @@ params = {
     'constant_upsample': False,
     'padding': 'same',
     'activation': 'ReLU',
-    'learning_rate': 1e-3,
+    'learning_rate': 2.0e-2,
     'num_annotated' : 10,
     'seed': 1,
     'pretrained_model': True,
+    'aug_params': {
+        'RandomHorizontalFlip': {'p': 0.25},
+        'RandomVerticalFlip': {'p': 0.25},
+        'RandomAffine': {"kwargs": {'degrees': 180, 'translate': (0.1,0.1), 'scale': (0.5,1.5), 'shear': 0.2,}, "p": 0.25},
+        'ElasticTransform': {"kwargs": {'alpha': [120.0,120.0], 'sigma': 8.0}, "p": 0.25},
     }
+}
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 params['device'] = device
 params['data'] = os.path.join(params['base_dir'], params['data'])
 
-trainval_data =  np.load(params['data'])
-train_images = trainval_data['X_train'].astype(np.float32)
-train_masks = trainval_data['Y_train']
-val_images = trainval_data['X_val'].astype(np.float32)
-val_masks = trainval_data['Y_val']
-number_of_annotated_training_images = params['num_annotated']
-
-# Seed to shuffle training data (annotated GT and raw image pairs).
-seed = params['seed']
-
-# First we shuffle the training images to remove any bias.
-X_shuffled, Y_shuffled = shuffle_train_data(train_images, train_masks, random_seed=seed)
-
-# Here we convert the number of annotated images to be used for training as percentage of available training data.
-percentage_of_annotated_training_images = float((number_of_annotated_training_images/train_images.shape[0])*100.0)
-assert percentage_of_annotated_training_images >= 0.0 and percentage_of_annotated_training_images <=100.0
-
-# Here we zero out the segmentations of those training images which are not part of the selected annotated images.
-X_frac, Y_frac = zero_out_train_data(X_shuffled, Y_shuffled, fraction = percentage_of_annotated_training_images)
-X_labeled, Y_labeled =  X_shuffled[:number_of_annotated_training_images], Y_shuffled[:number_of_annotated_training_images]
-X_unlabeled = X_shuffled[number_of_annotated_training_images:]
-
-X_val, Y_val_masks = val_images, val_masks
+X_labeled, Y_labeled, X_unlabeled, X_val, Y_val_masks = prepare_data(params) # BHW
 
 loss_weight = torch.Tensor([1.0,1.0,4.0]).to(device)
 
 if 'Flywing' in params['data']:
     print('Set interior to zero')
     Y_labeled[Y_labeled==1] = 0
-    Y_val_masks[Y_val_masks==1] = 0
     loss_weight = torch.Tensor([0.0,1.0,4.0]).to(device)
-
-# Here we add the channel dimension to our input images.
-# Dimensionality for training has to be 'SYXC' (Sample, Y-Dimension, X-Dimension, Channel)
-X_labeled = X_labeled[:,np.newaxis,...]
-X_unlabeled = X_unlabeled[:,np.newaxis,...]
+    
+X_labeled, Y_labeled, X_unlabeled, X_val, Y_val = [
+    d[:,np.newaxis,...] for d in [X_labeled, Y_labeled, X_unlabeled, X_val, Y_val_masks]
+]
 
 Y_labeled = convert_to_oneHot(Y_labeled)
-Y_labeled = Y_labeled.argmax(-1)
+Y_labeled = Y_labeled.argmax(-1).squeeze(1)
 
-X_val = X_val[:,np.newaxis,...]
-Y_val = convert_to_oneHot(Y_val_masks)
-Y_val = Y_val.argmax(-1)
+def worker_init_fn(worker_id):
+    worker_seed = torch.initial_seed() % (2*16) + worker_id
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+    torch.manual_seed(worker_seed)
 
-labeled_dataset = SliceDataset(raw=X_labeled, labels=Y_labeled)
+# TODO put data into TensorDataset and put whole dataset on device
+# implement normalization in torch instead of numpy
+labeled_dataset = SliceDataset(
+    raw=X_labeled.repeat(100, axis=0),
+    labels=Y_labeled.repeat(100, axis=0)
+    )
 labeled_dataloader = DataLoader(labeled_dataset,
-                    batch_size=10,
-                    shuffle=True,
-                    prefetch_factor=4,
-                    num_workers=4)
+                    batch_size=params['batch_size_labeled'],
+                    prefetch_factor=32 if params['num_workers'] > 1 else None,
+                    sampler=torch.utils.data.RandomSampler(
+                        [1.0]*len(labeled_dataset),
+                        num_samples=params['num_annotated'],
+                        replacement=True
+                    ),
+                    worker_init_fn=worker_init_fn,
+                    num_workers=params['num_workers']//2)
 
 validation_dataset = SliceDataset(raw=X_val, labels=Y_val)
 validation_dataloader = DataLoader(validation_dataset,
                     batch_size=20,
-                    shuffle=True,
-                    prefetch_factor=4,
-                    num_workers=4)
+                    shuffle=False,
+                    prefetch_factor=32 if params['num_workers'] > 1 else None,
+                    num_workers=params['num_workers']//2)
 
-unlabeled_dataset = SliceDataset(raw=X_unlabeled, labels=None)
-unlabeled_dataloader = DataLoader(unlabeled_dataset,
-                    batch_size=20,
-                    shuffle=True,
-                    prefetch_factor=4,
-                    num_workers=4)
 
 if params['pretrained_model']:
     model = smp.Unet(
@@ -137,86 +121,105 @@ else:
         num_fmaps_out = params['num_fmaps_out'],
         constant_upsample = params['constant_upsample']
     ).to(params['device'])
+model = model.train()
 
-
-learning_rate = params['learning_rate']
-optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9, weight_decay=1e-4, nesterov=True)
+optimizer = torch.optim.SGD(model.parameters(), lr=params['learning_rate'], momentum=0.9, weight_decay=1e-4, nesterov=True)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=params['training_steps'], eta_min=1e-5)
 
-os.makedirs(os.path.join(params['experiment'],'train','snaps'),exist_ok=True)
-writer_dir = os.path.join(params['experiment'],'train','summary',str(time.time()))
+s_augment = prep_spatial_aug_fn(params['aug_params'])
+c_augment = prep_intensity_aug_fn(128, s=0.5)
+loss_weight = torch.Tensor([1.0,1.0,4.0]).to(device)
+
+exp_dir = os.path.join(params['base_dir'], 'experiments', params['experiment'])
+snap_dir = os.path.join(exp_dir,'train','snaps')
+checkpoint_dir = os.path.join(exp_dir,'train','checkpoints')
+params["checkpoint_dir"] = checkpoint_dir
+writer_dir = os.path.join(exp_dir, 'train','summary',str(time.time()))
+os.makedirs(snap_dir, exist_ok=True)
 os.makedirs(writer_dir,exist_ok=True)
+os.makedirs(checkpoint_dir,exist_ok=True)
 writer = SummaryWriter(writer_dir)
 
-with open(os.path.join(params['experiment'], 'params.toml'), 'w') as f:
+with open(os.path.join(exp_dir, 'params.toml'), 'w') as f:
     toml.dump(params, f)
 
-step = 0
-s_augment = SpatialAugmenter(aug_params)
-ctransform_func = color_augmentations(128)
-#
-validation_loss = []
+val_ap50 = []
+step = -1
+
 while step<params['training_steps']:
     tmp_loader = iter(labeled_dataloader)
-    for raw, gt_3c in tmp_loader:
+    for raw_labeled, gt_3c in tmp_loader:
         if step == params['training_steps']:
             break
         step += 1
-        # augmentation pipeline
-        n_views = 1
-        raw = raw.to(device)
-        gt_3c = gt_3c.to(device).float()
-        img_caug = ctransform_func(raw)
-        s_augment.interpolation='bilinear'
-        img_saug = [] 
-        gt_3c_saug = []
-        for i in range(img_caug.shape[0]):
-            img_saug_tmp, gt_3c_saug_tmp = s_augment.forward_transform(img_caug[i].unsqueeze(0), gt_3c[i].unsqueeze(0).unsqueeze(0))
-            img_saug.append(img_saug_tmp)
-            gt_3c_saug.append(gt_3c_saug_tmp)
-        img_saug = torch.cat(img_saug, dim=0)
-        gt_3c_saug = torch.cat(gt_3c_saug, dim=0)
-        # calculate loss
         for param in model.parameters():
             param.grad = None
-        loss = 0
-        out_dict = {}
-        out_fast = model(img_saug)
-        loss_img = F.cross_entropy(input = out_fast,
-            target = gt_3c_saug.squeeze(1).long(), # no gradient
+        gt_3c = gt_3c.to(device) # add channel dimension
+        raw_labeled = raw_labeled.to(device)
+        raw_labeled = DP.Image(raw_labeled)
+        gt_3c = DP.Mask(gt_3c)
+        raw_labeled_aug = []
+        gt_3c_aug = []
+        # 
+        for raw_labeled_tmp, gt_3c_tmp in zip(raw_labeled, gt_3c):
+            tmp = torch.cat([raw_labeled_tmp, gt_3c_tmp.unsqueeze(0)], dim=0)
+            tmp = s_augment(tmp)
+            raw_labeled_tmp = tmp[:raw_labeled_tmp.shape[0]]
+            gt_3c_tmp = tmp[raw_labeled_tmp.shape[0]:]
+            gt_3c_tmp = gt_3c_tmp.squeeze(0)
+            raw_labeled_aug.append(raw_labeled_tmp)
+            gt_3c_aug.append(gt_3c_tmp)
+        raw_labeled_aug = torch.stack(raw_labeled_aug)
+        gt_3c_aug = torch.stack(gt_3c_aug)
+        raw_labeled_aug = c_augment(raw_labeled_aug)
+        out_labeled = model(raw_labeled_aug)
+        ce_loss_img = F.cross_entropy(
+            input = out_labeled,
+            target = gt_3c_aug.squeeze(0).long(), 
             weight = loss_weight,
-            reduction='none')
-        ce_loss = loss_img.mean()
-        writer.add_scalar('3 class loss', ce_loss , step)
-        loss += ce_loss
-        writer.add_scalar('total loss', loss , step)
-        loss.backward()
+            reduction = 'none'
+        )
+        ce_loss_img *= (gt_3c_aug != 0).to(float)
+        ce_loss = ce_loss_img.mean()
+        writer.add_scalar('ce_loss', ce_loss.item(), step)
+        print('step: ', step, 'ce_loss: ', ce_loss.cpu().item())
+        ce_loss.backward()
         optimizer.step()
         scheduler.step()
-        if step % 10000 == 0:
-            save_model(step, model, optimizer, loss, params['experiment']+"/model_step_"+str(step))
-        if step % 1000 == 0:
-            out_dict['raw'] = img_saug[0,...].cpu().detach().numpy()
-            out_dict['pred'] = out_fast[0,...].softmax(0).squeeze().cpu().detach().numpy()
-            out_dict['label'] = gt_3c_saug[0,...].cpu().detach().numpy()
+        # save snaps
+        if step % 1000 ==0:
             # save training snap
-            with h5py.File(os.path.join(params['experiment'],'train/snaps/snap_step_'+str(step)),'w') as f:
-               for key in list(out_dict.keys()):
-                   f.create_dataset(key, data = out_dict[key].astype(np.float32))
-        val_loss = []
-        if step % 200 == 0:
-            for raw, gt_3c in validation_dataloader:
-                raw = raw.to(device)
-                out = model(raw)
-                label = gt_3c.to(device)
-                loss = F.cross_entropy(input = out,
-                                        target = label.long().squeeze(1),
-                                        weight = loss_weight)
-                val_loss.append(loss.item())
-            val_loss = np.mean(val_loss)
-            validation_loss.append(val_loss)            
-            writer.add_scalar('val_loss', val_loss, step)
-            print('Validation loss: ', val_loss)
-            if val_loss <= np.min(validation_loss):
-                save_model(step, model, optimizer, loss, params['experiment']+"/best_model")
+            out_dict = {}
+            out_dict['raw_labeled'] = raw_labeled_aug[0,...].cpu().detach().numpy()
+            out_dict['pred_labeled'] = out_labeled[0,...].softmax(0).squeeze().cpu().detach().numpy()
+            out_dict['label'] = gt_3c_aug[0,...].cpu().unsqueeze(0).detach().numpy()
+            out_dict['ce_loss'] = ce_loss_img[0,...].cpu().unsqueeze(0).detach().numpy()
+            with h5py.File(os.path.join(snap_dir,'snap_step_'+str(step)+'.hdf'),'w') as f:
+                for key in list(out_dict.keys()):
+                    f.create_dataset(key, data = out_dict[key].astype(np.float32))
+        if step % 10000 == 0:
+            # save model
+            save_model(step, model, optimizer, checkpoint_dir, os.path.join(checkpoint_dir, 'model_step_'+str(step)+'.pth'))
 
+        if step % 100 == 0:
+            out_list = []
+            gt_list = []
+            padding = 16
+            for raw, gt in validation_dataloader:
+                raw = raw.to(device)
+                raw = F.pad(raw, [padding,padding,padding,padding], mode="reflect")
+                with torch.no_grad():
+                    out = model(raw)
+                out = out[..., padding:-padding, padding:-padding]
+                out_list += out.cpu().split(1)
+                gt_list += gt.squeeze(1).split(1)
+            metric_dict = calculate_scores(out_list, gt_list, "None")
+
+            val_ap50.append(metric_dict["ap_50"])
+            print("Validation:")
+            print(metric_dict)
+            for key in metric_dict.keys():
+                writer.add_scalar(key, metric_dict[key], step)
+            if metric_dict["ap_50"] >= np.max(val_ap50):
+                print('Save best model')
+                save_model(step, model, optimizer, metric_dict["ap_50"], os.path.join(checkpoint_dir, "best_model.pth"))

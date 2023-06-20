@@ -10,7 +10,7 @@ import random
 from torchvision import transforms
 from torchvision.transforms.transforms import RandomApply, GaussianBlur, ColorJitter
 from skimage.segmentation import find_boundaries
-
+from augmentations import test_time_aug
 
 def save_model(step, model, optimizer, loss, filename):
     torch.save({
@@ -154,7 +154,10 @@ class SliceDataset(Dataset):
         self.raw = raw
         self.labels = labels
     def __len__(self):
-        return self.raw.shape[0]
+        if isinstance(self.raw, list):
+            return len(self.raw)
+        else:
+            return self.raw.shape[0]
 
     def __getitem__(self, idx):
         raw_tmp = normalize_percentile(self.raw[idx].astype(np.float32))
@@ -282,3 +285,68 @@ def prepare_data(params):
 
     X_val, Y_val_masks = val_images, val_masks
     return X_labeled, Y_labeled, X_unlabeled, X_val, Y_val_masks
+
+
+def prepare_test_data(params):
+    test_data =  np.load(params['test_data'], allow_pickle=True)
+    test_images = test_data["X_test"]
+    test_masks = test_data["Y_test"]
+    if test_images.ndim == 1:
+        test_images = np.split(test_images, test_images.shape[0])
+        test_masks = np.split(test_masks, test_masks.shape[0])
+        test_images = [test_img[0] for test_img in test_images]
+        test_masks = [test_mask[0] for test_mask in test_masks]
+        for i, (img, mask) in enumerate(zip(test_images, test_masks)):
+            h, w = img.shape
+            if h % 32 != 0 or w % 32 != 0:
+                h_pad = 32 - (h % 32)
+                w_pad = 32 - (w % 32)
+                test_images[i] = np.pad(img, [[0,h_pad], [0, w_pad]])
+                test_masks[i] = np.pad(mask, [[0,h_pad], [0, w_pad]])
+    return test_images, test_masks
+
+
+def tile_and_stitch_ov(model, raw, input_shape, device, overlap=(0,0), crop=(0,0), flip=False, rotate=False):
+    B,C,H,W = raw.shape
+    test_img = torch.zeros(1,C,*input_shape)
+    with torch.no_grad():
+        out = model(test_img.to(device))
+    if isinstance(out, dict):
+        keys = list(out.keys())
+        output_shape = out[keys[0]].shape[-2:]
+        out_dict = {}
+        for key in keys:
+            out_dict[key] = torch.zeros(B,out[key].shape[1],H+input_shape[0],W+input_shape[1])
+        region_counter = torch.zeros_like(out_dict[key])
+        # fill dict with zero tensors of the right shape
+    else:
+        keys=False
+        output_shape = out.shape[-2:]
+        out = torch.zeros(B,out.shape[1],H+input_shape[0],W+input_shape[1])
+        region_counter = torch.zeros_like(out)
+    #
+    padh = (input_shape[0]-output_shape[0])//2
+    padw = (input_shape[1]-output_shape[1])//2
+    raw_padded = F.pad(raw, (padh,padh+input_shape[0]-crop[0]-1,padw,padw+input_shape[1]-crop[1]-1), mode='reflect')
+    for h in range(0,H,output_shape[0]-overlap[0]):
+        for w in range(0,W,output_shape[1]-overlap[0]):
+            raw_tmp = raw_padded[:,:,h:h+input_shape[0],w:w+input_shape[1]].to(device)
+            with torch.no_grad():
+                out_tmp = test_time_aug(raw_tmp, model, flip=flip, rotate=rotate).cpu()
+                out_tmp = center_crop(out_tmp, output_shape[0], output_shape[1])
+            if keys:
+                for key in keys:
+                    out_dict[key][:,:,h:h+output_shape[0],w:w+output_shape[1]] += out_tmp[key]
+            else:
+                out[:,:,h:h+output_shape[0],w:w+output_shape[1]] += out_tmp
+            region_counter[:,:,h:h+output_shape[0],w:w+output_shape[1]] += 1.0
+    # divide by region_counter and get rid of padded area
+    if keys:
+        for key in keys:
+            out_dict[key] /= region_counter
+            out_dict[key] = out_dict[key][:,:,:H,:W]
+        return out_dict
+    else:
+        out /= region_counter
+        out = out[:,:,:H,:W]
+        return out, region_counter
