@@ -1,14 +1,13 @@
-import os
-import sys
-import toml
-import torch
-from data_utils import *
-from torch.utils.data import DataLoader
-from evaluate import calculate_scores
-import segmentation_models_pytorch as smp
-from torch.nn import functional as F
-import pandas as pd
 import argparse
+
+import pandas as pd
+import segmentation_models_pytorch as smp
+import toml
+from torch.nn import functional as F
+from torch.utils.data import DataLoader
+
+from S3.utils.data import *
+from evaluate import calculate_scores
 
 
 def evaluate_experiment(experiment, checkpoint=None, tile_and_stitch=False,
@@ -32,14 +31,14 @@ def evaluate_experiment(experiment, checkpoint=None, tile_and_stitch=False,
     ]
     if isinstance(X_test, np.ndarray):
         X_test, Y_test = [
-            d[:,np.newaxis,...] for d in [X_test, Y_test]
+            d[:, np.newaxis, ...] for d in [X_test, Y_test]
         ]
     elif isinstance(X_test, list):
         X_test = [
-            d[np.newaxis,...] for d in X_test
+            d[np.newaxis, ...] for d in X_test
         ]
         Y_test = [
-            d[np.newaxis,...] for d in Y_test
+            d[np.newaxis, ...] for d in Y_test
         ]
 
     validation_dataset = SliceDataset(
@@ -72,7 +71,7 @@ def evaluate_experiment(experiment, checkpoint=None, tile_and_stitch=False,
         ).to(params['device'])
 
     exp_dir = os.path.join(params['base_dir'], 'experiments', params['experiment'])
-    checkpoint_dir = os.path.join(exp_dir, 'train','checkpoints')
+    checkpoint_dir = os.path.join(exp_dir, 'train', 'checkpoints')
 
     if checkpoint is None:
         checkpoint = "best_model.pth"
@@ -130,7 +129,7 @@ def evaluate_experiment(experiment, checkpoint=None, tile_and_stitch=False,
         df = pd.DataFrame(all_scores)
         df.to_csv(os.path.join(out_dir, 'val_scores_fg.csv'))
         best_fg_thresh = df['fg_thresh'][df['ap_50'].argmax()]
-    
+
     # optimize seed_thresh
     if not best_seed_thresh:
         seed_threshs = np.linspace(0.1,0.99,90)
@@ -183,6 +182,11 @@ def evaluate_experiment(experiment, checkpoint=None, tile_and_stitch=False,
     print(scores)
     df = pd.DataFrame(scores, index=[0])
     df.to_csv(os.path.join(out_dir, 'test_scores.csv'))
+
+
+def evaluate(args):
+    evaluate_experiment(args.experiment, args.checkpoint)
+
 
 if __name__ == '__main__':
     # read in experiment and checkpoint with argparse

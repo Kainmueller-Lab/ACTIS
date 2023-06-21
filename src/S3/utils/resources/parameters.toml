@@ -1,0 +1,39 @@
+base_dir = "/fast/AG_Kainmueller/jrumber/PhD/semi_supervised_IS"
+data = "data/DSB2018_n0/train/train_data.npz" # DSB data, 10 samples 10 19 38 76 152 
+# data = "data/Mouse_n0/train/train_data.npz" # Mouse data, 5 samples 5 10 19 38 76
+# data = "data/Flywing_n0/train/train_data.npz" # Flywing data, 5 samples 5 10 19 38 76
+experiment = "exp_0_dsb_seed1_samples10_DINO_L1_loss"
+batch_size_labeled = 5
+batch_size_unlabeled = 20
+num_workers = 6
+training_steps = 300000
+in_channels = 1
+num_fmaps = 32
+fmap_inc_factors = 2
+downsample_factors = [[2, 2], [2, 2], [2, 2], [2, 2]]
+num_fmaps_out = 3
+constant_upsample = false
+padding = "same"
+activation = "ReLU"
+learning_rate = 2.0e-5
+num_annotated = 10
+seed = 1
+checkpoint_path = "/fast/AG_Kainmueller/jrumber/PhD/semi_supervised_publication/exp_0_dsb_seed1_samples10_pretrained/best_model"
+projection_loss = true
+proj_loss_weight = 400.0 # 1.0 for DINO loss, 200 for L1 loss
+pretrained_model = true
+projection_softmax = "none" # "pre" projection, "post" projection or none
+projection_loss = "L1" # "MSE" or "COSINE" or "L1" or DINO
+projection_head = "DINO" # "DINO", "MLP" or "SHALLOW"
+trainable_projector = true
+embedding_dim = 512
+load_student_weights = true # if False it initializes a fresh student model instead of loading one
+warmup_steps = 0 # during warmup_steps the teacher model doesn't get updated
+logging_warmup = 1000 # after logging_warmup the past validation scores get reset
+fast_update_slow_model = true
+
+[aug_params]
+RandomHorizontalFlip = { p = 0.25 }
+RandomVerticalFlip = { p = 0.25 }
+RandomAffine = { kwargs = { degrees = 180, translate = [0.1, 0.1], scale = [0.5, 1.5], shear = 0.2 }, p = 0.25 }
+ElasticTransform = { kwargs = { alpha = [120.0, 120.0], sigma = 8.0 }, p = 0.25 }
