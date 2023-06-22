@@ -15,7 +15,8 @@ import segmentation_models_pytorch as smp
 import toml
 from S3.utils.augmentations import prep_intensity_aug_fn, prep_spatial_aug_fn
 from torchvision import datapoints as DP
-from evaluate import calculate_scores
+
+from S3.evaluate import calculate_scores
 
 torch.backends.cudnn.benchmark = True
 torch.autograd.set_detect_anomaly(True)

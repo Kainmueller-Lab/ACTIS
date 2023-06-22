@@ -19,7 +19,9 @@ from S3.nn.loss import get_projection_loss
 from S3.utils.augmentations import test_time_aug, prep_intensity_aug_fn, prep_spatial_aug_fn
 from torchvision import datapoints as DP
 from S3.nn.projector import prep_projection_head
-from evaluate import calculate_scores
+
+import S3.evaluate
+
 from types import SimpleNamespace
 
 torch.backends.cudnn.benchmark = True

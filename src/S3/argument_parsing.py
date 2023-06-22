@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 from typing import Callable
 
@@ -32,9 +33,9 @@ def __run_subcommand(args, parser):
 
     get_logger().info("S3 Version %s" % S3.__version__)
 
-    get_logger().debug("loading parameter file...")
-
-    args.param = Parameter.from_toml(args.param)
+    if command == "train_semi" or command == "train_super":
+        get_logger().debug("loading parameter file...")
+        args.param = Parameter.from_toml(args.param)
 
     get_logger().debug("Running %s subcommand..." % command)
 
@@ -49,24 +50,24 @@ def create_parser():
 
     # train_semi action
     p = parser.create_file_command_parser('train_semi', train_semi, '')
-    parser.add_argument(
-        "--wandb", dest="wandb", action="store_true", default=False,
+    p.add_argument(
+        "--wandb", dest="wandb", action="store_true", default=False, required=False,
         help="Use weights and biases for the analysis. Environment variable \"WANDB_API_KEY\" has to be configured! "
              "You can find this in your user settings (e.g. https://wandb.ai/settings)"
     )
-    parser.add_argument(
+    p.add_argument(
         "--wandb_project", dest="wandb_project", type=str, default="S3",
     )
 
     # train super action
     p = parser.create_file_command_parser('train_super', train_supervised,
                                           'Train your network based on your parameters')
-    parser.add_argument(
+    p.add_argument(
         "--wandb", dest="wandb", action="store_true", default=False,
         help="Use weights and biases for the analysis. Environment variable \"WANDB_API_KEY\" has to be configured! "
              "You can find this in your user settings (e.g. https://wandb.ai/settings)"
     )
-    parser.add_argument(
+    p.add_argument(
         "--wandb_project", dest="wandb_project", type=str, default="S3",
     )
 
@@ -76,8 +77,6 @@ def create_parser():
     )
     p.add_argument("--experiment", type=str, default="exp_0_mouse_seed1_samples10_DINO_L1_loss_highLR")
     p.add_argument("--checkpoint", type=str, default="best_model.pth")
-
-    p.add_argument('in_file', type=str, help='Path to the input tif file.')  # todo: copy args
 
     return parser.parser
 
@@ -115,7 +114,7 @@ class S3Parser(ArgumentParser):
             required=False,
             help='Points to a folder where the log file will be stored. If not specified, the log file will be stored '
                  'in the current working directory.',
-            default=None
+            default=os.getcwd()
         )
         return parent_parser
 
