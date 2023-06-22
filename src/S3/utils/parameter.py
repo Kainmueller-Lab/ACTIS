@@ -2,9 +2,9 @@ import os
 from pathlib import Path
 
 import toml
+from collections.abc import Sequence
 
-
-class Parameter:
+class Parameter(Sequence):
     """Base class for all parameters."""
 
     def __init__(self, *args, **kwargs):
@@ -17,7 +17,7 @@ class Parameter:
         args_init = toml.load(str(param_base_file))
 
         for key in args_init:
-            self._setattr(key, args_init[key])
+            self.__setitem__(key, args_init[key])
 
         if args != ():
             for dictionary in args:
@@ -31,6 +31,19 @@ class Parameter:
     def _setattr(self, key, val):
         if hasattr(self, key):
             setattr(self, key, val)
+
+    def __setitem__(self, key, value):
+        setattr(self, key, value)
+
+    def __getitem__(self, key):
+        return getattr(self, key)
+
+    def __iter__(self):
+        for key in self.__dict__:
+            yield key
+
+    def __len__(self):
+        return len(self.__dict__)
 
     def reset(self):
         """Reset all parameters to None."""

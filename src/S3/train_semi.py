@@ -182,7 +182,7 @@ def train_semi(args):
     os.makedirs(checkpoint_dir, exist_ok=True)
     writer = SummaryWriter(writer_dir)
     with open(os.path.join(exp_dir, 'params.toml'), 'w') as f:
-        toml.dump(params, f)
+        toml.dump(params.__dict__, f)
     val_ap50 = []
     val_ap50_slow = []
     step = -1

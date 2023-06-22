@@ -1,4 +1,6 @@
 import os
+import random
+import h5py
 from types import SimpleNamespace
 
 from S3.utils.parameter import Parameter
@@ -78,7 +80,7 @@ def train_supervised(args):
     def worker_init_fn(worker_id):
         worker_seed = torch.initial_seed() % (2 * 16) + worker_id
         np.random.seed(worker_seed)
-        random.seed(worker_seed)  # todo: import error
+        random.seed(worker_seed)
         torch.manual_seed(worker_seed)
 
     # TODO put data into TensorDataset and put whole dataset on device
@@ -142,7 +144,7 @@ def train_supervised(args):
     os.makedirs(checkpoint_dir, exist_ok=True)
     writer = SummaryWriter(writer_dir)
     with open(os.path.join(exp_dir, 'params.toml'), 'w') as f:
-        toml.dump(params, f)
+        toml.dump(params.__dict__, f)
     val_ap50 = []
     step = -1
     while step < params['training_steps']:
