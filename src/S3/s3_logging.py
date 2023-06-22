@@ -2,7 +2,6 @@ import logging
 import sys
 from pathlib import Path
 
-
 import S3
 from S3.utils.io import get_doc_file_prefix
 
@@ -53,3 +52,18 @@ def close_logger():
 
 def get_default_formatter():
     return logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
+
+
+def wandb_init(args):
+    import wandb
+    try:
+        run = wandb.init(project=args.wandb_project, config=args.__dict__, sync_tensorboard=True, dir=args.log_out)
+    except wandb.errors.UsageError:
+        print(
+            "You chose to run the experiment logging to wandb.ai. Environment variable \"WANDB_API_KEY\" most"
+            "likely not configured. Switch off wandb logging by specifying not passing --wandb to the call."
+        )
+        raise
+    run.name = run.id
+
+    return run

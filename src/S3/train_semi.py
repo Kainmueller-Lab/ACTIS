@@ -72,6 +72,10 @@ params = {
 def train_semi(args):
     params = args.param
 
+    run = None
+    if args.wandb:
+        run = wandb_init(args)
+
     global device, projector, step, param, loss
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     params['device'] = device
@@ -155,6 +159,10 @@ def train_semi(args):
         slow_model = copy.deepcopy(model)
         slow_model.load_state_dict(torch.load(params['checkpoint_path'])['model_state_dict'])
         slow_model = slow_model.train()
+
+    if args.wandb:
+        wandb.watch(model, log_freq=100)
+
     projector = prep_projection_head(params)
     optimizer = torch.optim.SGD(model.parameters(), lr=params['learning_rate'], momentum=0.9, weight_decay=1e-4,
                                 nesterov=True)
@@ -340,5 +348,5 @@ def train_semi(args):
 
 
 if __name__ == '__main__':
-    args = SimpleNamespace(param=Parameter(params))  # the parameter from above
+    args = SimpleNamespace(param=Parameter(params), wandb=False)  # the parameter from above
     train_semi(args)

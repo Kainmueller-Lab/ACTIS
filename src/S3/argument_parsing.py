@@ -49,10 +49,26 @@ def create_parser():
 
     # train_semi action
     p = parser.create_file_command_parser('train_semi', train_semi, '')
+    parser.add_argument(
+        "--wandb", dest="wandb", action="store_true", default=False,
+        help="Use weights and biases for the analysis. Environment variable \"WANDB_API_KEY\" has to be configured! "
+             "You can find this in your user settings (e.g. https://wandb.ai/settings)"
+    )
+    parser.add_argument(
+        "--wandb_project", dest="wandb_project", type=str, default="S3",
+    )
 
     # train super action
     p = parser.create_file_command_parser('train_super', train_supervised,
                                           'Train your network based on your parameters')
+    parser.add_argument(
+        "--wandb", dest="wandb", action="store_true", default=False,
+        help="Use weights and biases for the analysis. Environment variable \"WANDB_API_KEY\" has to be configured! "
+             "You can find this in your user settings (e.g. https://wandb.ai/settings)"
+    )
+    parser.add_argument(
+        "--wandb_project", dest="wandb_project", type=str, default="S3",
+    )
 
     # evaluate experiment action
     p = parser.create_command_parser(

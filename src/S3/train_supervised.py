@@ -54,6 +54,10 @@ params = {
 def train_supervised(args):
     params = args.param
 
+    run = None
+    if args.wandb:
+        run = wandb_init(args)
+
     global device, step
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     params['device'] = device
@@ -116,6 +120,10 @@ def train_supervised(args):
             num_fmaps_out=params['num_fmaps_out'],
             constant_upsample=params['constant_upsample']
         ).to(params['device'])
+
+    if args.wandb:
+        wandb.watch(model, log_freq=100)
+
     model = model.train()
     optimizer = torch.optim.SGD(model.parameters(), lr=params['learning_rate'], momentum=0.9, weight_decay=1e-4,
                                 nesterov=True)
@@ -218,5 +226,5 @@ def train_supervised(args):
 
 
 if __name__ == '__main__':
-    args = SimpleNamespace(param=Parameter(params))
+    args = SimpleNamespace(param=Parameter(params), wandb=False)
     train_supervised(args)
