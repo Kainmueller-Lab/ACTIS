@@ -1,7 +1,6 @@
 
 import os
 from tqdm import tqdm
-import random
 from evaluate import evaluate_linear_sum_assignment
 import numpy as np
 import re
@@ -9,7 +8,6 @@ import tifffile as tif
 import mahotas
 import pandas as pd
 import copy
-import argparse
 import scipy.ndimage
 
 def watershed(surface, markers, fg):
