@@ -1,0 +1,25 @@
+base_dir = "C:/Users/lorenz/OneDrive - Charité - Universitätsmedizin Berlin/semi_supervised_IS"
+#base_dir = "/fast/AG_Kainmueller/jrumber/PhD/semi_supervised_IS"
+data = "data/DSB2018_n0/train/train_data.npz"
+#data = "data/Mouse_n0/train/train_data.npz"
+#data = "data/Flywing_n0/train/train_data.npz"
+
+checkpoint_path = "/fast/AG_Kainmueller/jrumber/PhD/semi_supervised_IS/experiments/dsb_seed1_samples152/train/checkpoints/best_model.pth"
+experiment = "dsb_seed1_samples19"
+num_annotated = 19
+batch_size_labeled = 5
+num_workers = 4
+training_steps = 200000
+in_channels = 1
+num_fmaps = 32
+fmap_inc_factors = 2
+downsample_factors = [ [ 2, 2,], [ 2, 2,], [ 2, 2,], [ 2, 2,],]
+num_fmaps_out = 3
+constant_upsample = false
+padding = "same"
+activation = "ReLU"
+learning_rate = 0.001
+seed = 1
+encoder_weights = "imagenet"
+s = 1.0
+size = 128

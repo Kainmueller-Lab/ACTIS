@@ -1,0 +1,11 @@
+toml
+tqdm
+torch
+torchvision
+h5py
+segmentation_models_pytorch
+tifffile
+scipy
+mahotas
+scikit-image
+zarr

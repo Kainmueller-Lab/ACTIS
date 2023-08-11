@@ -4,10 +4,9 @@ import numpy as np
 import os
 import h5py
 from torch.utils.data import Dataset
-from unet import *
 from torch import nn
 import random
-from torchvision import transforms
+from torchvision.transforms import v2 as transforms
 from torchvision.transforms.transforms import RandomApply, GaussianBlur, ColorJitter
 from skimage.segmentation import find_boundaries
 
@@ -20,65 +19,7 @@ def save_model(step, model, optimizer, loss, filename):
         'loss': loss
         }, filename)
     
-class CombinedDataLoader():
-    '''
-    DataLoader which combines all the other DataLoaders in this project. 
-    __next__ yields a batch of size batch_size containing samples from all DataLoaders,
-    composed based on their sampling_probs
 
-    dataloaders: list
-        Containing torch.utils.data.DataLoader objects with batch_size=1
-    batch_size: int
-
-    sampling_probs: list
-        Probabilities for sampling from the dataloaders
-
-    batch_size: int
-        Determines len of output sample list
-    
-    buffer_size: int
-        The number of samples to load into buffer before shuffling
-
-    mode: str
-        either 'train' or 'validation'
-    '''
-    def __init__(self, dataloaders, sampling_probs, batch_size, mode):
-        if len(dataloaders) != len(sampling_probs):
-            raise ValueError('Number of dataloaders does not match sampling_probs')
-        if np.sum(sampling_probs) != 1.0:
-            raise ValueError(f'Sampling_probs sum to {np.sum(sampling_probs)} != 1.0')
-        
-        self.dataloaders = dataloaders
-        self.batch_size = batch_size
-        self.sampling_probs = sampling_probs
-        self.dataloader_iterables = [iter(dataloader) for dataloader in dataloaders]
-        self.dataloader_queues = [[] for dataloader in dataloaders]
-        self.mode = mode
-        
-    def get_item(self, idx):
-        try:
-            return next(self.dataloader_iterables[idx])
-        except StopIteration:
-            if self.mode == 'train':
-                self.dataloader_iterables[idx] = iter(self.dataloaders[idx])
-                return next(self.dataloader_iterables[idx])
-            else:
-                raise StopIteration
- 
-    def __iter__(self):
-        return self
-    
-    def __next__(self):
-        datasource = np.random.multinomial(1, self.sampling_probs, size=self.batch_size) # batchsize x sampling_probs
-        indexes = np.argmax(datasource, axis=1) # batchsize
-        batch = []
-        for idx in indexes:
-            batch.append(self.get_item(idx))
-        if self.batch_size == 1:
-            return batch.pop(0)
-        else:
-            return batch
-    
 class GaussianNoise(torch.nn.Module):
     def __init__(self, sigma):
         super().__init__()
@@ -88,6 +29,61 @@ class GaussianNoise(torch.nn.Module):
         device = img.device
         noise = torch.randn(img.shape).to(device) * self.sigma
         return img + noise
+
+
+def prep_spatial_aug_fn(aug_params):
+    aug_list = []
+    for key in aug_params.keys():
+        if "kwargs" in aug_params[key].keys():
+            aug_list.append(getattr(transforms, key)(**aug_params[key]['kwargs']))
+        else:
+            aug_list.append(getattr(transforms, key)(**aug_params[key]))
+
+    aug_fn = transforms.Compose(aug_list)
+    return aug_fn
+
+
+def test_time_aug(input, model, flip=True, rotate=True, eval=True):
+    # input: [B, C, H, W]
+    if eval:
+        model = model.eval()
+    else:
+        model = model.train()
+    B, C, H, W = input.shape
+    input_list = []
+    if rotate:
+        for k in [1,2,3]:
+            input_list.append(
+                torch.rot90(input, k, [2,3])
+            )
+    if flip:
+        for k in [0,1]:
+            input_list.append(
+                torch.flip(input, [2+k])
+            )
+    input_list.append(input)
+    input_aug = torch.cat(input_list, dim=0)
+    with torch.no_grad():
+        output_aug = model(input_aug)
+    output_aug_split = output_aug.split(B)
+    i = 0
+    output_list = []
+    if rotate:
+        for k in [-1,-2,-3]:
+            output_list.append(
+                torch.rot90(output_aug_split[i], k, [2,3])
+            )
+            i += 1
+    if flip:
+        for k in [0,1]:
+            output_list.append(
+                torch.flip(output_aug_split[i], [2+k])
+            )
+            i += 1
+    output_list.append(output_aug[-B:])
+    output = torch.stack(output_list, dim=0).mean(dim=0)
+    model = model.train()
+    return output
 
 def color_augmentations(size, s=0.5):
     # taken from https://github.com/sthalles/SimCLR/blob/master/data_aug/contrastive_learning_dataset.py
@@ -149,15 +145,24 @@ def pad_up_to(tensor, xx, yy):
         return F.pad(tensor, (r,l,b,t,0,0,0,0))
 
 class SliceDataset(Dataset):
-    def __init__(self, raw, labels):
+    def __init__(self, raw, labels, norm_axis=None):
         super().__init__()
         self.raw = raw
         self.labels = labels
+        self.norm_axis = norm_axis
+
     def __len__(self):
-        return self.raw.shape[0]
+        if isinstance(self.raw, list):
+            return len(self.raw)
+        else:
+            return self.raw.shape[0]
+        
+    def process(self, raw):
+        raw_tmp = normalize_percentile(raw, axis=self.norm_axis)
+        return raw_tmp
 
     def __getitem__(self, idx):
-        raw_tmp = normalize_percentile(self.raw[idx].astype(np.float32))
+        raw_tmp = self.process(self.raw[idx].astype(np.float32))
         if self.labels is not None:
             return raw_tmp, self.labels[idx].astype(np.float32)
         else:
@@ -282,3 +287,35 @@ def prepare_data(params):
 
     X_val, Y_val_masks = val_images, val_masks
     return X_labeled, Y_labeled, X_unlabeled, X_val, Y_val_masks
+
+
+def prepare_test_data(params):
+    test_data =  np.load(params['test_data'], allow_pickle=True)
+    test_images = test_data["X_test"]
+    test_masks = test_data["Y_test"]
+    if test_images.ndim == 1:
+        test_images = np.split(test_images, test_images.shape[0])
+        test_masks = np.split(test_masks, test_masks.shape[0])
+        test_images = [test_img[0] for test_img in test_images]
+        test_masks = [test_mask[0] for test_mask in test_masks]
+        for i, (img, mask) in enumerate(zip(test_images, test_masks)):
+            h, w = img.shape
+            if h % 32 != 0 or w % 32 != 0:
+                h_pad = 32 - (h % 32)
+                w_pad = 32 - (w % 32)
+                test_images[i] = np.pad(img, [[0,h_pad], [0, w_pad]])
+                test_masks[i] = np.pad(mask, [[0,h_pad], [0, w_pad]])
+    return test_images, test_masks
+
+
+def mono_color_augmentations(size, s=0.5):
+    # taken from https://github.com/sthalles/SimCLR/blob/master/data_aug/contrastive_learning_dataset.py
+    """Return a set of data augmentation transformations as described in the SimCLR paper."""
+    data_transforms = transforms.Compose([
+        transforms.RandomApply([
+            transforms.ColorJitter(0.8 * s, 0.8 * s, 0.8 * s, 0.2 * s),
+            transforms.GaussianBlur(kernel_size=int(0.01 * size), sigma=(0.01,0.5)),
+            GaussianNoise(0.2*s)
+        ], p=0.75),
+        ])
+    return data_transforms
