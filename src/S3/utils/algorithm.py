@@ -1,7 +1,8 @@
+import mahotas
 import numpy as np
 
 from S3.s3_logging import get_logger
-import mahotas
+
 
 def watershed(surface, markers, fg):
     # compute watershed
@@ -9,13 +10,13 @@ def watershed(surface, markers, fg):
 
     # write watershed directly
     get_logger().debug("watershed output: %s %s %f %f",
-                 ws.shape, ws.dtype, ws.max(), ws.min())
+                       ws.shape, ws.dtype, ws.max(), ws.min())
 
     # overlay fg and write
     wsFG = ws * fg
     get_logger().debug("watershed (foreground only): %s %s %f %f",
-                 wsFG.shape, wsFG.dtype, wsFG.max(),
-                 wsFG.min())
+                       wsFG.shape, wsFG.dtype, wsFG.max(),
+                       wsFG.min())
     wsFGUI = wsFG.astype(np.uint16)
 
     return wsFGUI

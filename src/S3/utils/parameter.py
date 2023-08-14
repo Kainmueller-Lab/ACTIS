@@ -1,8 +1,9 @@
 import os
+from collections.abc import Sequence
 from pathlib import Path
 
 import toml
-from collections.abc import Sequence
+
 
 class Parameter(Sequence):
     """Base class for all parameters."""

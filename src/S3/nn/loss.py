@@ -1,7 +1,6 @@
+import numpy as np
 import torch
 from torch import nn
-import torch.nn.functional as F
-import numpy as np
 
 
 class QuantileLoss(nn.Module):
@@ -15,9 +14,9 @@ class QuantileLoss(nn.Module):
         self.loss_fn = self.params["loss_fn_QuantLoss"]
         self.nclasses = nclasses
         self.quantile_ema = {
-            i:{"positive": 0.2} for i in range(nclasses)
+            i: {"positive": 0.2} for i in range(nclasses)
         }
-    
+
     def quantile_ema_update(self, quantile_ema, quantile):
         """EMA update for quantile
         Args:
@@ -33,10 +32,10 @@ class QuantileLoss(nn.Module):
             step (int): current step
         """
         return np.min([(
-                    self.quantile_start
-                    + ((self.quantile_end - self.quantile_start) * step)
-                    / self.quantile_warmup_steps
-                ), self.quantile_end])
+                self.quantile_start
+                + ((self.quantile_end - self.quantile_start) * step)
+                / self.quantile_warmup_steps
+        ), self.quantile_end])
 
     def class_wise_confidence_selection(self, pseudo_labels):
         """Selects the pixels with the lowest loss for each class and for positive and negative
@@ -50,9 +49,9 @@ class QuantileLoss(nn.Module):
         quantized_pseudo_l = pseudo_labels.argmax(axis=1)
         # select pixels for each class in gt
         for i in range(self.nclasses):
-            single_class_mask = torch.where(quantized_pseudo_l == i,True,False)
+            single_class_mask = torch.where(quantized_pseudo_l == i, True, False)
             # get the softmax scores for single class
-            single_class_scores = pseudo_labels[:,i,...][single_class_mask]
+            single_class_scores = pseudo_labels[:, i, ...][single_class_mask]
             # get the quantile for the single class
             if single_class_scores.nelement() != 0:
                 quantile_positive = torch.quantile(single_class_scores, self.quantile)
@@ -61,7 +60,7 @@ class QuantileLoss(nn.Module):
                 )
             # threshold pseudo_label
             positive_mask = torch.where(
-                (pseudo_labels[:,i,...] >= self.quantile_ema[i]["positive"]), 1, 0
+                (pseudo_labels[:, i, ...] >= self.quantile_ema[i]["positive"]), 1, 0
             ) * single_class_mask
             # append the masks to the selected_masks
             selected_masks.append(positive_mask)

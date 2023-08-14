@@ -1,79 +1,57 @@
 import os
-import random
-import h5py
-from types import SimpleNamespace
-
-from S3.utils.parameter import Parameter
 
 os.environ["OMP_NUM_THREADS"] = "1"
+import sys
 from torch.utils.data import DataLoader
+import random
+import h5py
 from S3.utils.data import *
 import numpy as np
-from S3.nn.unet import *
-from S3.utils.data import save_model
 from torch.utils.tensorboard import SummaryWriter
 import time
 import segmentation_models_pytorch as smp
-import toml
-from S3.utils.augmentations import prep_intensity_aug_fn, prep_spatial_aug_fn
 from torchvision import datapoints as DP
-
-from S3.evaluate import calculate_scores
+from evaluate import calculate_scores
+from torchvision.transforms import InterpolationMode
+import argparse
+import toml
 
 torch.backends.cudnn.benchmark = True
-torch.autograd.set_detect_anomaly(True)
 
-params = {
-    'base_dir': '/fast/AG_Kainmueller/jrumber/PhD/semi_supervised_IS',
-    'data': 'data/DSB2018_n0/train/train_data.npz',  # DSB data, 10 samples 10 19 38 76 152
-    # 'data': 'data/Mouse_n0/train/train_data.npz', # Mouse data, 5 samples 5 10 19 38 76
-    # 'data': 'data/Flywing_n0/train/train_data.npz', # Flywing data, 5 samples 5 10 19 38 76
-    'experiment': 'exp_0_dsb_seed1_samples10',
-    'batch_size_labeled': 20,
-    'num_workers': 6,
-    'training_steps': 100000,
-    'in_channels': 1,
-    'num_fmaps': 32,
-    'fmap_inc_factors': 2,
-    'downsample_factors': [[2, 2, ], [2, 2, ], [2, 2, ], [2, 2, ], ],
-    'num_fmaps_out': 3,
-    'constant_upsample': False,
-    'padding': 'same',
-    'activation': 'ReLU',
-    'learning_rate': 2.0e-2,
-    'num_annotated': 10,
-    'seed': 1,
-    'pretrained_model': True,
-    'aug_params': {
+
+def supervised_training(params):
+    params['aug_params'] = {
         'RandomHorizontalFlip': {'p': 0.25},
         'RandomVerticalFlip': {'p': 0.25},
         'RandomAffine': {"kwargs": {'degrees': 180, 'translate': (0.1, 0.1), 'scale': (0.5, 1.5), 'shear': 0.2, },
                          "p": 0.25},
         'ElasticTransform': {"kwargs": {'alpha': [120.0, 120.0], 'sigma': 8.0}, "p": 0.25},
     }
-}
+    params['aug_params_label'] = {
+        'RandomHorizontalFlip': {'p': 0.25},
+        'RandomVerticalFlip': {'p': 0.25},
+        'RandomAffine': {"kwargs": {'degrees': 180, 'translate': (0.1, 0.1), 'scale': (0.5, 1.5), 'shear': 0.2, },
+                         "p": 0.25,
+                         "interpolation": InterpolationMode.NEAREST},
+        'ElasticTransform': {"kwargs": {'alpha': [120.0, 120.0], 'sigma': 8.0}, "p": 0.25,
+                             "interpolation": InterpolationMode.NEAREST},
+    }
 
-
-def train_supervised(args):
-    params = args.param
-
-    run = None
-    if args.wandb:
-        run = wandb_init(args)
-
-    global device, step
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     params['device'] = device
     params['data'] = os.path.join(params['base_dir'], params['data'])
+
     X_labeled, Y_labeled, X_unlabeled, X_val, Y_val_masks = prepare_data(params)  # BHW
     loss_weight = torch.Tensor([1.0, 1.0, 4.0]).to(device)
+
     if 'Flywing' in params['data']:
         print('Set interior to zero')
         Y_labeled[Y_labeled == 1] = 0
-        loss_weight = torch.Tensor([0.0, 1.0, 4.0]).to(device)
+
     X_labeled, Y_labeled, X_unlabeled, X_val, Y_val = [
         d[:, np.newaxis, ...] for d in [X_labeled, Y_labeled, X_unlabeled, X_val, Y_val_masks]
     ]
+
     Y_labeled = convert_to_oneHot(Y_labeled)
     Y_labeled = Y_labeled.argmax(-1).squeeze(1)
 
@@ -83,11 +61,9 @@ def train_supervised(args):
         random.seed(worker_seed)
         torch.manual_seed(worker_seed)
 
-    # TODO put data into TensorDataset and put whole dataset on device
-    # implement normalization in torch instead of numpy
     labeled_dataset = SliceDataset(
         raw=X_labeled.repeat(100, axis=0),
-        labels=Y_labeled.repeat(100, axis=0)
+        labels=Y_labeled.repeat(100, axis=0),
     )
     labeled_dataloader = DataLoader(labeled_dataset,
                                     batch_size=params['batch_size_labeled'],
@@ -98,42 +74,38 @@ def train_supervised(args):
                                         replacement=True
                                     ),
                                     worker_init_fn=worker_init_fn,
-                                    num_workers=params['num_workers'] // 2)
-    validation_dataset = SliceDataset(raw=X_val, labels=Y_val)
+                                    num_workers=params['num_workers'] // 2,
+                                    drop_last=True)
+
+    validation_dataset = SliceDataset(
+        raw=X_val,
+        labels=Y_val,
+    )
     validation_dataloader = DataLoader(validation_dataset,
                                        batch_size=20,
                                        shuffle=False,
                                        prefetch_factor=32 if params['num_workers'] > 1 else None,
                                        num_workers=params['num_workers'] // 2)
-    if params['pretrained_model']:
-        model = smp.Unet(
-            encoder_name="timm-efficientnet-b5",  # "timm-efficientnet-b5", # choose encoder
-            encoder_weights="imagenet",  # use `imagenet` pre-trained weights for encoder initialization
-            in_channels=params['in_channels'],  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
-            classes=params['num_fmaps_out'],  # model output channels (number of classes in your dataset)
-        ).to(params['device'])
-    else:
-        model = UNet(
-            in_channels=params['in_channels'],
-            num_fmaps=params['num_fmaps'],
-            fmap_inc_factor=params['fmap_inc_factors'],
-            downsample_factors=params['downsample_factors'],
-            activation=params['activation'],
-            padding=params['padding'],
-            num_fmaps_out=params['num_fmaps_out'],
-            constant_upsample=params['constant_upsample']
-        ).to(params['device'])
 
-    if args.wandb:
-        wandb.watch(model, log_freq=100)
-
+    model = smp.Unet(
+        encoder_name="timm-efficientnet-b5",
+        encoder_weights=params["encoder_weights"],
+        in_channels=params['in_channels'],
+        classes=params['num_fmaps_out'],
+    ).to(params['device'])
     model = model.train()
-    optimizer = torch.optim.SGD(model.parameters(), lr=params['learning_rate'], momentum=0.9, weight_decay=1e-4,
-                                nesterov=True)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=params['training_steps'], eta_min=1e-5)
+
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=params['learning_rate'], weight_decay=1e-3
+    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=params['training_steps'], eta_min=1e-5
+    )
+
     s_augment = prep_spatial_aug_fn(params['aug_params'])
-    c_augment = prep_intensity_aug_fn(128, s=0.5)
-    loss_weight = torch.Tensor([1.0, 1.0, 4.0]).to(device)
+    s_augment_label = prep_spatial_aug_fn(params['aug_params_label'])
+    c_augment = mono_color_augmentations(params['size'], params['s'])
+
     exp_dir = os.path.join(params['base_dir'], 'experiments', params['experiment'])
     snap_dir = os.path.join(exp_dir, 'train', 'snaps')
     checkpoint_dir = os.path.join(exp_dir, 'train', 'checkpoints')
@@ -143,10 +115,12 @@ def train_supervised(args):
     os.makedirs(writer_dir, exist_ok=True)
     os.makedirs(checkpoint_dir, exist_ok=True)
     writer = SummaryWriter(writer_dir)
+
     with open(os.path.join(exp_dir, 'params.toml'), 'w') as f:
-        toml.dump(params.__dict__, f)
+        toml.dump(params, f)
+
     val_ap50 = []
-    step = -1
+    step = 0
     while step < params['training_steps']:
         tmp_loader = iter(labeled_dataloader)
         for raw_labeled, gt_3c in tmp_loader:
@@ -158,15 +132,16 @@ def train_supervised(args):
             gt_3c = gt_3c.to(device)  # add channel dimension
             raw_labeled = raw_labeled.to(device)
             raw_labeled = DP.Image(raw_labeled)
-            gt_3c = DP.Mask(gt_3c)
+            gt_3c = DP.Mask(gt_3c.to(torch.int32))
             raw_labeled_aug = []
             gt_3c_aug = []
-            #
+            # 
             for raw_labeled_tmp, gt_3c_tmp in zip(raw_labeled, gt_3c):
-                tmp = torch.cat([raw_labeled_tmp, gt_3c_tmp.unsqueeze(0)], dim=0)
-                tmp = s_augment(tmp)
-                raw_labeled_tmp = tmp[:raw_labeled_tmp.shape[0]]
-                gt_3c_tmp = tmp[raw_labeled_tmp.shape[0]:]
+                # apply the same augmentations on raw and gt
+                state = torch.get_rng_state()
+                raw_labeled_tmp = s_augment(raw_labeled_tmp)
+                torch.set_rng_state(state)
+                gt_3c_tmp = s_augment_label(gt_3c_tmp.unsqueeze(0))
                 gt_3c_tmp = gt_3c_tmp.squeeze(0)
                 raw_labeled_aug.append(raw_labeled_tmp)
                 gt_3c_aug.append(gt_3c_tmp)
@@ -178,9 +153,9 @@ def train_supervised(args):
                 input=out_labeled,
                 target=gt_3c_aug.squeeze(0).long(),
                 weight=loss_weight,
-                reduction='none'
+                reduction='none',
+                label_smoothing=0.05
             )
-            ce_loss_img *= (gt_3c_aug != 0).to(float)
             ce_loss = ce_loss_img.mean()
             writer.add_scalar('ce_loss', ce_loss.item(), step)
             print('step: ', step, 'ce_loss: ', ce_loss.cpu().item())
@@ -201,9 +176,9 @@ def train_supervised(args):
             if step % 10000 == 0:
                 # save model
                 save_model(step, model, optimizer, checkpoint_dir,
-                           os.path.join(checkpoint_dir, 'model_step_' + str(step) + '.pth'))
-
-            if step % 100 == 0:
+                           os.path.join(checkpoint_dir, 'model_step_' + str(step) + '.pth')
+                           )
+            if step % 200 == 0:
                 out_list = []
                 gt_list = []
                 padding = 16
@@ -225,9 +200,16 @@ def train_supervised(args):
                 if metric_dict["ap_50"] >= np.max(val_ap50):
                     print('Save best model')
                     save_model(step, model, optimizer, metric_dict["ap_50"],
-                               os.path.join(checkpoint_dir, "best_model.pth"))
+                               os.path.join(checkpoint_dir, "best_model.pth")
+                               )
 
 
 if __name__ == '__main__':
-    args = SimpleNamespace(param=Parameter(params), wandb=False)
-    train_supervised(args)
+    parser = argparse.ArgumentParser(description='Supervised training')
+    parser.add_argument('--params', type=str, default="configs/params_supervised.toml", help='Path to params.toml file')
+    args = parser.parse_args()
+    params = toml.load(args.params)
+    supervised_training(params)
+    sys.subprocess.call(
+        ["python", "evaluate_experiment.py", "--experiment", params["experiment"]]
+    )

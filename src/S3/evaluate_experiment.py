@@ -1,9 +1,9 @@
 import argparse
+import os
 
 import pandas as pd
 import segmentation_models_pytorch as smp
 import toml
-from torch.nn import functional as F
 from torch.utils.data import DataLoader
 
 from S3.utils.data import *
@@ -24,7 +24,7 @@ def evaluate_experiment(experiment, checkpoint=None, tile_and_stitch=False,
         params["test_data"] = '/fast/AG_Kainmueller/jrumber/PhD/semi_supervised_IS/data/Mouse_n0/test/test_data.npz'
 
     X_test, Y_test = prepare_test_data(params)
-    _, _, _, X_val, Y_val_masks = prepare_data(params) # BHW
+    _, _, _, X_val, Y_val_masks = prepare_data(params)  # BHW
 
     X_val, Y_val_masks,  = [
         d[:,np.newaxis,...] for d in [X_val, Y_val_masks]
@@ -46,18 +46,18 @@ def evaluate_experiment(experiment, checkpoint=None, tile_and_stitch=False,
         labels=Y_val_masks,
     )
     validation_dataloader = DataLoader(validation_dataset,
-                        batch_size=20,
-                        shuffle=False,
-    )
+                                       batch_size=20,
+                                       shuffle=False,
+                                       )
 
     test_dataset = SliceDataset(
         raw=X_test,
         labels=Y_test,
     )
     test_dataloader = DataLoader(test_dataset,
-                        batch_size=1 if "DSB2018" in params["test_data"] else 20,
-                        shuffle=False,
-    )
+                                 batch_size=1 if "DSB2018" in params["test_data"] else 20,
+                                 shuffle=False,
+                                 )
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     params['device'] = device
@@ -90,11 +90,11 @@ def evaluate_experiment(experiment, checkpoint=None, tile_and_stitch=False,
         if h % 32 != 0 or w % 32 != 0:
             h_pad = 32 - (h % 32)
             w_pad = 32 - (w % 32)
-            raw = F.pad(raw, [0,w_pad, 0, h_pad], "reflect")
+            raw = F.pad(raw, [0, w_pad, 0, h_pad], "reflect")
             padded = True
         else:
             padded = False
-        raw_tmp = F.pad(raw, [padding,padding,padding,padding], mode="reflect")
+        raw_tmp = F.pad(raw, [padding, padding, padding, padding], mode="reflect")
         with torch.no_grad():
             out = test_time_aug(raw_tmp, model, flip=True, rotate=False).cpu()
         out = out[..., padding:-padding, padding:-padding]
@@ -108,7 +108,7 @@ def evaluate_experiment(experiment, checkpoint=None, tile_and_stitch=False,
 
     # optimize fg_thresh
     if not best_fg_thresh:
-        fg_threshs = np.linspace(0.1,0.99,90)
+        fg_threshs = np.linspace(0.1, 0.99, 90)
         seed_thresh = 0.6
         all_scores = {
             'fg_thresh': [],
@@ -132,7 +132,7 @@ def evaluate_experiment(experiment, checkpoint=None, tile_and_stitch=False,
 
     # optimize seed_thresh
     if not best_seed_thresh:
-        seed_threshs = np.linspace(0.1,0.99,90)
+        seed_threshs = np.linspace(0.1, 0.99, 90)
         fg_thresh = best_fg_thresh
         all_scores = {key: [] for key in all_scores.keys()}
         for seed_thresh in seed_threshs:
@@ -158,7 +158,7 @@ def evaluate_experiment(experiment, checkpoint=None, tile_and_stitch=False,
         if h % 32 != 0 or w % 32 != 0:
             h_pad = 32 - (h % 32)
             w_pad = 32 - (w % 32)
-            raw = F.pad(raw, [0,w_pad, 0, h_pad], "reflect")
+            raw = F.pad(raw, [0, w_pad, 0, h_pad], "reflect")
             padded = True
         else:
             padded = False
@@ -172,7 +172,6 @@ def evaluate_experiment(experiment, checkpoint=None, tile_and_stitch=False,
         out_list += out.cpu().split(1)
         gt_list += gt.squeeze(1).split(1)
 
-
     # calculate scores
     scores = calculate_scores(
         out_list, gt_list, os.path.join(out_dir, "fname"), best_fg_thresh, best_seed_thresh
@@ -185,7 +184,8 @@ def evaluate_experiment(experiment, checkpoint=None, tile_and_stitch=False,
 
 
 def evaluate(args):
-    evaluate_experiment(args.experiment, args.checkpoint)
+    evaluate_experiment(args.experiment, args.checkpoint,  args.best_fg_thresh,
+        args.best_seed_thresh,)
 
 
 if __name__ == '__main__':

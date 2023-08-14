@@ -2,7 +2,6 @@ import glob
 import logging
 import os
 
-import sys
 import h5py
 import numpy as np
 import scipy.ndimage
@@ -153,7 +152,7 @@ def maybe_crop(pred_labels, gt_labels, overlapping_inst=False):
         end = np.array(bigger_arr.shape) - begin
         if len(bigger_arr.shape) == 2:
             bigger_arr = bigger_arr[begin[0]:end[0],
-                                    begin[1]:end[1]]
+                         begin[1]:end[1]]
         else:
             if (np.array(bigger_arr.shape) -
                 np.array(smaller_arr.shape))[2] % 2 == 1:
@@ -654,9 +653,9 @@ def evaluate_volume(gt_labels, pred_labels, outFn,
         metrics.addMetric(tblname, "AP_FN", fn)
 
         # calculate instance-level precision, recall, AP and fscore
-        ap_denoiseg = 1. * (tp) / max(1, tp +  fp + fn)
-        precision = 1. * (tp) / max(1, tp +  fp)
-        recall = 1. * (tp) / max(1, tp +  fn)
+        ap_denoiseg = 1. * (tp) / max(1, tp + fp + fn)
+        precision = 1. * (tp) / max(1, tp + fp)
+        recall = 1. * (tp) / max(1, tp + fn)
         ap = precision * recall
         aps.append(ap)
         if (precision + recall) > 0:
@@ -893,7 +892,7 @@ def visualize_nuclei(gt_labels_rel, iouMat, gt_ind, pred_ind):
     for pi in range(num_pred_labels):
         if pi in pred_ind:
             continue
-        vis_fp_seg[pred_labels_rel == pi+1] = 1
+        vis_fp_seg[pred_labels_rel == pi + 1] = 1
         if len(gt_labels_rel.shape) == 3:
             set_boundary(pred_labels_rel, pi + 1,
                          vis_fp_seg_bnd)

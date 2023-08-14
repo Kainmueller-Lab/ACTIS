@@ -1,16 +1,11 @@
+import numpy as np
 import torch
 import torch.nn.functional as F
-import numpy as np
-import os
-import h5py
+from skimage.segmentation import find_boundaries
 from torch.utils.data import Dataset
-from unet import *
-from torch import nn
-import random
 from torchvision.transforms import v2 as transforms
 from torchvision.transforms.transforms import RandomApply, GaussianBlur, ColorJitter
-from skimage.segmentation import find_boundaries
-from S3.utils.augmentations import test_time_aug
+from unet import *
 
 
 def save_model(step, model, optimizer, loss, filename):
@@ -19,14 +14,14 @@ def save_model(step, model, optimizer, loss, filename):
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'loss': loss
-        }, filename)
+    }, filename)
 
 
 class GaussianNoise(torch.nn.Module):
     def __init__(self, sigma):
         super().__init__()
         self.sigma = sigma
-        
+
     def forward(self, img):
         device = img.device
         noise = torch.randn(img.shape).to(device) * self.sigma
@@ -54,14 +49,14 @@ def test_time_aug(input, model, flip=True, rotate=True, eval=True):
     B, C, H, W = input.shape
     input_list = []
     if rotate:
-        for k in [1,2,3]:
+        for k in [1, 2, 3]:
             input_list.append(
-                torch.rot90(input, k, [2,3])
+                torch.rot90(input, k, [2, 3])
             )
     if flip:
-        for k in [0,1]:
+        for k in [0, 1]:
             input_list.append(
-                torch.flip(input, [2+k])
+                torch.flip(input, [2 + k])
             )
     input_list.append(input)
     input_aug = torch.cat(input_list, dim=0)
@@ -71,15 +66,15 @@ def test_time_aug(input, model, flip=True, rotate=True, eval=True):
     i = 0
     output_list = []
     if rotate:
-        for k in [-1,-2,-3]:
+        for k in [-1, -2, -3]:
             output_list.append(
-                torch.rot90(output_aug_split[i], k, [2,3])
+                torch.rot90(output_aug_split[i], k, [2, 3])
             )
             i += 1
     if flip:
-        for k in [0,1]:
+        for k in [0, 1]:
             output_list.append(
-                torch.flip(output_aug_split[i], [2+k])
+                torch.flip(output_aug_split[i], [2 + k])
             )
             i += 1
     output_list.append(output_aug[-B:])
@@ -87,23 +82,25 @@ def test_time_aug(input, model, flip=True, rotate=True, eval=True):
     model = model.train()
     return output
 
+
 def color_augmentations(size, s=0.5):
     # taken from https://github.com/sthalles/SimCLR/blob/master/data_aug/contrastive_learning_dataset.py
     """Return a set of data augmentation transformations as described in the SimCLR paper."""
     color_jitter = ColorJitter(0.8 * s, 0.8 * s, 0.8 * s, 0.2 * s)
     data_transforms = torch.nn.Sequential(
         RandomApply([color_jitter,
-                    GaussianBlur(kernel_size=int(0.01 * size), sigma=(0.2,0.2))], p=0.5),
+                     GaussianBlur(kernel_size=int(0.01 * size), sigma=(0.2, 0.2))], p=0.5),
         GaussianNoise(0.03)
-        )
+    )
     return data_transforms
 
 
 def center_crop(t, croph, cropw):
-    _,_,h,w = t.shape
-    startw = w//2-(cropw//2)
-    starth = h//2-(croph//2)
-    return t[:,:,starth:starth+croph,startw:startw+cropw]
+    _, _, h, w = t.shape
+    startw = w // 2 - (cropw // 2)
+    starth = h // 2 - (croph // 2)
+    return t[:, :, starth:starth + croph, startw:startw + cropw]
+
 
 def normalize_percentile(x, pmin=3, pmax=99.8, axis=None, clip=False,
                          eps=1e-8, dtype=np.float32):
@@ -111,40 +108,43 @@ def normalize_percentile(x, pmin=3, pmax=99.8, axis=None, clip=False,
     ma = np.percentile(x, pmax, axis=axis, keepdims=True)
     return normalize_min_max(x, mi, ma, clip=clip, eps=eps, dtype=dtype)
 
+
 def normalize_min_max(x, mi, ma, clip=False, eps=1e-20, dtype=np.float32):
     if mi is None:
         mi = np.min(x)
     if ma is None:
         ma = np.max(x)
     if dtype is not None:
-        x   = x.astype(dtype, copy=False)
-        mi  = dtype(mi) if np.isscalar(mi) else mi.astype(dtype, copy=False)
-        ma  = dtype(ma) if np.isscalar(ma) else ma.astype(dtype, copy=False)
+        x = x.astype(dtype, copy=False)
+        mi = dtype(mi) if np.isscalar(mi) else mi.astype(dtype, copy=False)
+        ma = dtype(ma) if np.isscalar(ma) else ma.astype(dtype, copy=False)
         eps = dtype(eps)
 
-    x = (x - mi) / ( ma - mi + eps )
+    x = (x - mi) / (ma - mi + eps)
 
     if clip:
         x = np.clip(x, 0, 1)
     return x
-        
+
+
 def pad_up_to(tensor, xx, yy):
-        """
-        :param tensor: torch tensor
-        :param xx: desired height
-        :param yy: desirex width
-        :return: padded array
-        """
+    """
+    :param tensor: torch tensor
+    :param xx: desired height
+    :param yy: desirex width
+    :return: padded array
+    """
 
-        b,c,h,w = tensor.shape
+    b, c, h, w = tensor.shape
 
-        t = (xx - h) // 2
-        b = xx - t - h
+    t = (xx - h) // 2
+    b = xx - t - h
 
-        l = (yy - w) // 2
-        r = yy - l - w
-        t,b,l,r = [np.abs(i) for i in [t,b,l,r]]
-        return F.pad(tensor, (r,l,b,t,0,0,0,0))
+    l = (yy - w) // 2
+    r = yy - l - w
+    t, b, l, r = [np.abs(i) for i in [t, b, l, r]]
+    return F.pad(tensor, (r, l, b, t, 0, 0, 0, 0))
+
 
 class SliceDataset(Dataset):
     def __init__(self, raw, labels, norm_axis=None):
@@ -170,6 +170,7 @@ class SliceDataset(Dataset):
         else:
             return raw_tmp
 
+
 def shuffle_train_data(X_train, Y_train, random_seed):
     """
     Shuffles data with seed 1.
@@ -192,6 +193,7 @@ def shuffle_train_data(X_train, Y_train, random_seed):
     Y_train = Y_train[seed_ind]
 
     return X_train, Y_train
+
 
 def zero_out_train_data(X_train, Y_train, fraction):
     """
@@ -232,8 +234,8 @@ def convert_to_oneHot(data, eps=1e-8):
     data_oneHot = np.zeros((*data.shape, 3), dtype=np.float32)
     for i in range(data.shape[0]):
         data_oneHot[i] = onehot_encoding(add_boundary_label(data[i].astype(np.int32)))
-        if ( np.abs(np.max(data[i])) <= eps ):
-            data_oneHot[i][...,0] *= 0
+        if (np.abs(np.max(data[i])) <= eps):
+            data_oneHot[i][..., 0] *= 0
 
     return data_oneHot
 
@@ -256,6 +258,7 @@ def add_boundary_label(lbl, dtype=np.uint16):
     res[b] = 2
     return res
 
+
 def onehot_encoding(lbl, n_classes=3, dtype=np.uint32):
     """ n_classes will be determined by max lbl value if its value is None """
     onehot = np.zeros((*lbl.shape, n_classes), dtype=dtype)
@@ -265,7 +268,7 @@ def onehot_encoding(lbl, n_classes=3, dtype=np.uint32):
 
 
 def prepare_data(params):
-    trainval_data =  np.load(params['data'])
+    trainval_data = np.load(params['data'])
     train_images = trainval_data['X_train'].astype(np.float32)
     train_masks = trainval_data['Y_train']
     val_images = trainval_data['X_val'].astype(np.float32)
@@ -279,12 +282,14 @@ def prepare_data(params):
     X_shuffled, Y_shuffled = shuffle_train_data(train_images, train_masks, random_seed=seed)
 
     # Here we convert the number of annotated images to be used for training as percentage of available training data.
-    percentage_of_annotated_training_images = float((number_of_annotated_training_images/train_images.shape[0])*100.0)
-    assert percentage_of_annotated_training_images >= 0.0 and percentage_of_annotated_training_images <=100.0
+    percentage_of_annotated_training_images = float(
+        (number_of_annotated_training_images / train_images.shape[0]) * 100.0)
+    assert percentage_of_annotated_training_images >= 0.0 and percentage_of_annotated_training_images <= 100.0
 
     # Here we zero out the segmentations of those training images which are not part of the selected annotated images.
-    X_frac, Y_frac = zero_out_train_data(X_shuffled, Y_shuffled, fraction = percentage_of_annotated_training_images)
-    X_labeled, Y_labeled =  X_shuffled[:number_of_annotated_training_images], Y_shuffled[:number_of_annotated_training_images]
+    X_frac, Y_frac = zero_out_train_data(X_shuffled, Y_shuffled, fraction=percentage_of_annotated_training_images)
+    X_labeled, Y_labeled = X_shuffled[:number_of_annotated_training_images], Y_shuffled[
+                                                                             :number_of_annotated_training_images]
     X_unlabeled = X_shuffled[number_of_annotated_training_images:]
 
     X_val, Y_val_masks = val_images, val_masks
@@ -292,7 +297,7 @@ def prepare_data(params):
 
 
 def prepare_test_data(params):
-    test_data =  np.load(params['test_data'], allow_pickle=True)
+    test_data = np.load(params['test_data'], allow_pickle=True)
     test_images = test_data["X_test"]
     test_masks = test_data["Y_test"]
     if test_images.ndim == 1:
@@ -305,8 +310,8 @@ def prepare_test_data(params):
             if h % 32 != 0 or w % 32 != 0:
                 h_pad = 32 - (h % 32)
                 w_pad = 32 - (w % 32)
-                test_images[i] = np.pad(img, [[0,h_pad], [0, w_pad]])
-                test_masks[i] = np.pad(mask, [[0,h_pad], [0, w_pad]])
+                test_images[i] = np.pad(img, [[0, h_pad], [0, w_pad]])
+                test_masks[i] = np.pad(mask, [[0, h_pad], [0, w_pad]])
     return test_images, test_masks
 
 
@@ -316,8 +321,8 @@ def mono_color_augmentations(size, s=0.5):
     data_transforms = transforms.Compose([
         transforms.RandomApply([
             transforms.ColorJitter(0.8 * s, 0.8 * s, 0.8 * s, 0.2 * s),
-            transforms.GaussianBlur(kernel_size=int(0.01 * size), sigma=(0.01,0.5)),
-            GaussianNoise(0.2*s)
+            transforms.GaussianBlur(kernel_size=int(0.01 * size), sigma=(0.01, 0.5)),
+            GaussianNoise(0.2 * s)
         ], p=0.75),
-        ])
+    ])
     return data_transforms
