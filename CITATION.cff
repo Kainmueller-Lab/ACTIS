@@ -8,10 +8,10 @@ authors:
     orcid: https://orcid.org/0000-0002-3792-9695
   - family-names: Franzen
     given-names: Jannik
-title: "S3"
-abstract: Semi Supervised Training for Instance and Semantic Segmentation.
+title: "ACTIS"
+abstract: Augmentation Consistency Training for Instance Segmentation.
 license: MIT
 version: 0.1.0
 date-released: 2023-06-21
-repository: "https://github.com/Kainmueller-Lab/semi_supervised_IS.git"
+repository: "https://github.com/Kainmueller-Lab/ACTIS.git"
 type: software

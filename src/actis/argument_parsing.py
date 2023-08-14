@@ -3,12 +3,12 @@ import os
 import sys
 from typing import Callable
 
-import S3
-from S3.evaluate_experiment import evaluate
-from S3.s3_logging import get_log_file, get_logger, configure_logger, close_logger
-from S3.train_semi import train_semi
-from S3.train_supervised import train_supervised
-from S3.utils.parameter import Parameter
+import actis
+from actis.evaluate_experiment import evaluate
+from actis.actis_logging import get_log_file, get_logger, configure_logger, close_logger
+from actis.train_semi import train_semi
+from actis.train_supervised import train_supervised
+from actis.utils.parameter import Parameter
 
 
 def startup():
@@ -31,7 +31,7 @@ def __run_subcommand(args, parser):
     configure_logger('INFO', logfile_name=log_file)
 
 
-    get_logger().info("S3 Version %s" % S3.__version__)
+    get_logger().info("actis Version %s" % actis.__version__)
 
     if command == "train_semi" or command == "train_super":
         get_logger().debug("loading parameter file...")
@@ -56,7 +56,7 @@ def create_parser():
              "You can find this in your user settings (e.g. https://wandb.ai/settings)"
     )
     p.add_argument(
-        "--wandb_project", dest="wandb_project", type=str, default="S3",
+        "--wandb_project", dest="wandb_project", type=str, default="actis",
     )
 
     # train super action
@@ -68,7 +68,7 @@ def create_parser():
              "You can find this in your user settings (e.g. https://wandb.ai/settings)"
     )
     p.add_argument(
-        "--wandb_project", dest="wandb_project", type=str, default="S3",
+        "--wandb_project", dest="wandb_project", type=str, default="actis",
     )
 
     # evaluate experiment action
@@ -100,7 +100,7 @@ class S3Parser(ArgumentParser):
     def create_parent_parser() -> ArgumentParser:
         """Parent parser for all subparsers to have the same set of arguments."""
         parent_parser = ArgumentParser(add_help=False)
-        parent_parser.add_argument('--version', '-V', action='version', version="%s " % S3.__version__)
+        parent_parser.add_argument('--version', '-V', action='version', version="%s " % actis.__version__)
         # parse logging
         parent_parser.add_argument(
             '--log',
@@ -122,12 +122,12 @@ class S3Parser(ArgumentParser):
         """Creates the main parser for the pipeline."""
         parser = ArgumentParser(
             add_help=True,
-            description='S3 - Semi Supervised Training for Instance and Semantic Segmentation.',
+            description='actis - Semi Supervised Training for Instance and Semantic Segmentation.',
             parents=[self.parent_parser])
         return parser
 
     def create_command_parser(self, command_name: str, command_function: Callable, command_help: str) -> ArgumentParser:
-        """Creates a parser for a S3 command, specified by a name, a function and a help description."""
+        """Creates a parser for a actis command, specified by a name, a function and a help description."""
         parser = self.subparsers.add_parser(command_name, help=command_help, parents=[self.parent_parser])
         parser.set_defaults(func=command_function)
         return parser

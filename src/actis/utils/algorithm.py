@@ -1,7 +1,7 @@
 import mahotas
 import numpy as np
 
-from S3.s3_logging import get_logger
+from actis.actis_logging import get_logger
 
 
 def watershed(surface, markers, fg):

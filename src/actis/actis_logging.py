@@ -2,10 +2,10 @@ import logging
 import sys
 from pathlib import Path
 
-import S3
-from S3.utils.io import get_doc_file_prefix
+import actis
+from actis.utils.io import get_doc_file_prefix
 
-LOGGER_NAME = S3.__name__
+LOGGER_NAME = actis.__name__
 
 
 def get_logger():

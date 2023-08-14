@@ -6,7 +6,7 @@ import segmentation_models_pytorch as smp
 import toml
 from torch.utils.data import DataLoader
 
-from S3.utils.data import *
+from actis.utils.data import *
 from evaluate import calculate_scores
 
 
