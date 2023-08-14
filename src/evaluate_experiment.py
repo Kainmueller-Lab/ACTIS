@@ -2,7 +2,6 @@ import os
 import sys
 import toml
 import torch
-from unet import *
 from data_utils import *
 from torch.utils.data import DataLoader
 from evaluate import calculate_scores
@@ -12,7 +11,8 @@ import pandas as pd
 import argparse
 
 
-def evaluate_experiment(experiment, checkpoint=None, best_fg_thresh=None, best_seed_thresh=None):
+def evaluate_experiment(experiment, checkpoint=None, tile_and_stitch=False,
+                        best_fg_thresh=None, best_seed_thresh=None):
     params_path = os.path.join("experiments", experiment, "params.toml")
     params = toml.load(params_path)
     print(params["experiment"])
@@ -24,13 +24,8 @@ def evaluate_experiment(experiment, checkpoint=None, best_fg_thresh=None, best_s
     if "Mouse" in params["data"]:
         params["test_data"] = '/fast/AG_Kainmueller/jrumber/PhD/semi_supervised_IS/data/Mouse_n0/test/test_data.npz'
 
-
     X_test, Y_test = prepare_test_data(params)
     _, _, _, X_val, Y_val_masks = prepare_data(params) # BHW
-
-#    if 'Flywing' in params['test_data']:
-        #print('Set interior to zero')
-        #Y_val_masks[Y_val_masks==1] = 0
 
     X_val, Y_val_masks,  = [
         d[:,np.newaxis,...] for d in [X_val, Y_val_masks]
@@ -50,7 +45,6 @@ def evaluate_experiment(experiment, checkpoint=None, best_fg_thresh=None, best_s
     validation_dataset = SliceDataset(
         raw=X_val,
         labels=Y_val_masks,
-        squeeze=True if "Lizard" in params['data'] else False,
     )
     validation_dataloader = DataLoader(validation_dataset,
                         batch_size=20,
@@ -60,7 +54,6 @@ def evaluate_experiment(experiment, checkpoint=None, best_fg_thresh=None, best_s
     test_dataset = SliceDataset(
         raw=X_test,
         labels=Y_test,
-        squeeze=True if "Lizard" in params['data'] else False,
     )
     test_dataloader = DataLoader(test_dataset,
                         batch_size=1 if "DSB2018" in params["test_data"] else 20,
@@ -71,23 +64,11 @@ def evaluate_experiment(experiment, checkpoint=None, best_fg_thresh=None, best_s
     params['device'] = device
     print(device)
 
-    if params['pretrained_model']:
-        model = smp.Unet(
-            encoder_name= "timm-efficientnet-b5", # "timm-efficientnet-b5", # choose encoder
-            encoder_weights="imagenet",     # use `imagenet` pre-trained weights for encoder initialization
-            in_channels=params['in_channels'],        # model input channels (1 for gray-scale images, 3 for RGB, etc.)
-            classes=params['num_fmaps_out'],          # model output channels (number of classes in your dataset)
-            ).to(params['device'])
-    else:
-        model = UNet(
-            in_channels = params['in_channels'],
-            num_fmaps = params['num_fmaps'],
-            fmap_inc_factor = params['fmap_inc_factors'],
-            downsample_factors = params['downsample_factors'],
-            activation = params['activation'],
-            padding = params['padding'],
-            num_fmaps_out = params['num_fmaps_out'],
-            constant_upsample = params['constant_upsample']
+    model = smp.Unet(
+        encoder_name= "timm-efficientnet-b5", # "timm-efficientnet-b5", # choose encoder
+        encoder_weights="imagenet",     # use `imagenet` pre-trained weights for encoder initialization
+        in_channels=params['in_channels'],        # model input channels (1 for gray-scale images, 3 for RGB, etc.)
+        classes=params['num_fmaps_out'],          # model output channels (number of classes in your dataset)
         ).to(params['device'])
 
     exp_dir = os.path.join(params['base_dir'], 'experiments', params['experiment'])
@@ -101,7 +82,7 @@ def evaluate_experiment(experiment, checkpoint=None, best_fg_thresh=None, best_s
 
     # inference on validation set
     padding = 16
-    input_shape = [128, 128] if "Lizard" not in params['data'] else [256, 256]
+    input_shape = [128, 128]
     out_list = []
     gt_list = []
     for raw, gt in validation_dataloader:
@@ -208,10 +189,11 @@ if __name__ == '__main__':
     args = argparse.ArgumentParser()
     args.add_argument("--experiment", type=str, default="mouse_seed1_samples76_promix_fast_updates_strong_aug_semi")
     args.add_argument("--checkpoint", type=str, default="best_model.pth")
+    args.add_argument("--tile_and_stitch", type=bool, default=False)
     args.add_argument("--best_fg_thresh", type=float, default=None)
     args.add_argument("--best_seed_thresh", type=float, default=None)
     args = args.parse_args()
     evaluate_experiment(
-        args.experiment, args.checkpoint, args.best_fg_thresh,
+        args.experiment, args.checkpoint, args.tile_and_stitch, args.best_fg_thresh,
         args.best_seed_thresh,
     )
