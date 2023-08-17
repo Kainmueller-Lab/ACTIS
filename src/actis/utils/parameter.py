@@ -58,6 +58,18 @@ class Parameter(Sequence):
 
         return cls(params)
 
+    def to_toml(self, path: str):
+        """Save the parameter object as a yml file."""
+        with open(path, "w") as f:
+            d = {}
+            for key, val in self.__dict__.items():
+                if isinstance(val, Path):
+                    d[key] = str(val)
+                else:
+                    d[key] = val
+
+            toml.dump(d, f)
+
     def __str__(self, indent=1):
         """Return a string representation of the parameter object."""
         s = "%s:  \n" % self.__class__.__name__

@@ -1,5 +1,7 @@
 import os
 
+from actis.actis_logging import get_logger
+
 os.environ["OMP_NUM_THREADS"] = "1"
 import sys
 from torch.utils.data import DataLoader
@@ -22,7 +24,12 @@ import toml
 torch.backends.cudnn.benchmark = True
 
 
+def semi_supervised_training_cmdline(args):
+    semi_supervised_training(args.param)
+
+
 def semi_supervised_training(params):
+    # todo: aug_params from toml are overwritten - delibaretly?
     params['aug_params'] = {
         'RandomHorizontalFlip': {'p': 0.25},
         'RandomVerticalFlip': {'p': 0.25},
@@ -55,8 +62,8 @@ def semi_supervised_training(params):
 
     X_labeled, Y_labeled, X_unlabeled, X_val, Y_val_masks = prepare_data(params)  # BHW
 
-    if 'Flywing' in params['data']:
-        print('Set interior to zero')
+    if 'Flywing' in str(params['data']):
+        get_logger().info('Set interior to zero')
         Y_labeled[Y_labeled == 1] = 0
         loss_weight = torch.Tensor([0.0, 1.0, 4.0]).to(device)
 
@@ -128,7 +135,7 @@ def semi_supervised_training(params):
     slow_model.load_state_dict(torch.load(params['checkpoint_path'])['model_state_dict'])
     slow_model = slow_model.train()
 
-    if "no_moco" in params.keys() and params["no_moco"]:
+    if params["no_moco"]:
         del slow_model
         slow_model = model
 
@@ -154,8 +161,7 @@ def semi_supervised_training(params):
     os.makedirs(checkpoint_dir, exist_ok=True)
     writer = SummaryWriter(writer_dir)
 
-    with open(os.path.join(exp_dir, 'params.toml'), 'w') as f:
-        toml.dump(params, f)
+    params.to_toml(os.path.join(exp_dir, 'params.toml'))
 
     val_ap50 = []
     val_ap50_slow = []
@@ -236,8 +242,11 @@ def semi_supervised_training(params):
             ce_loss = ce_loss_img.mean()
             writer.add_scalar('ce_loss', ce_loss.item(), step)
             loss = con_loss + ce_loss
-            print('step: ', step, 'aug_con_loss: ', con_loss.item(), 'ce_loss: ', ce_loss.cpu().item(), "total loss: ",
-                  loss.item())
+            get_logger().info(
+                "step: %s aug_con_loss: %s ce_loss: %s total loss: %s" % (
+                    step, con_loss.item(), ce_loss.cpu().item(), loss.item()
+                )
+            )
             loss.backward()
             optimizer.step()
             scheduler.step()
@@ -260,7 +269,7 @@ def semi_supervised_training(params):
                     for key in list(out_dict.keys()):
                         f.create_dataset(key, data=out_dict[key].astype(np.float32))
             if step % 100 == 0 and step > params['warmup_steps']:
-                print('Update Momentum Network')
+                get_logger().info('Update Momentum Network')
                 for param_slow, param_fast in zip(slow_model.parameters(), model.parameters()):
                     param_slow = 0.99 * param_slow + 0.01 * param_fast
                     writer.add_scalar("semi_quantile", loss_fn_semi.quantile, step)
@@ -284,24 +293,24 @@ def semi_supervised_training(params):
                     out_list += out.cpu().split(1)
                     out_list_slow += out_slow.cpu().split(1)
                     gt_list += gt.squeeze(1).split(1)
-                metric_dict = calculate_scores(out_list, gt_list, "None")
-                metric_dict_slow = calculate_scores(out_list_slow, gt_list, "None")
+                metric_dict = calculate_scores(out_list, gt_list, "metric", base_path=params['base_dir'])
+                metric_dict_slow = calculate_scores(out_list_slow, gt_list, "metric", base_path=params['base_dir'])
 
                 val_ap50.append(metric_dict["ap_50"])
                 val_ap50_slow.append(metric_dict_slow["ap_50"])
-                print("Validation:")
-                print(metric_dict)
+                get_logger().info("Validation:")
+                get_logger().info(metric_dict)
                 for key in metric_dict.keys():
                     writer.add_scalar(key, metric_dict[key], step)
                 for key in metric_dict_slow.keys():
                     writer.add_scalar(key + "_slow", metric_dict_slow[key], step)
                 if metric_dict["ap_50"] >= np.max(val_ap50):
-                    print('Save best model')
+                    get_logger().info('Save best model')
                     save_model(step, model, optimizer, loss, os.path.join(checkpoint_dir, "best_model.pth"))
                     if metric_dict["ap_50"] > metric_dict_slow["ap_50"] and params['fast_update_slow_model']:
                         slow_model = copy.deepcopy(model)
                 if metric_dict_slow["ap_50"] >= np.max(val_ap50_slow):
-                    print('Save best slow model')
+                    get_logger().info('Save best slow model')
                     save_model(step, slow_model, optimizer, checkpoint_dir,
                                os.path.join(checkpoint_dir, "best_slow_model.pth"))
 
@@ -313,5 +322,5 @@ if __name__ == '__main__':
     params = toml.load(args.params)
     semi_supervised_training(params)
     sys.subprocess.call(
-        ["python", "evaluate_experiment.py", "--experiment", params["experiment"]]
+        ["python", "evaluate_experiment.py", "--experiment", params["experiment"]]  # todo: direct evaluation upon script call?
     )

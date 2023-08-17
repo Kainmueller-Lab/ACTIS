@@ -1,5 +1,7 @@
 import os
 
+from actis.actis_logging import get_logger
+
 os.environ["OMP_NUM_THREADS"] = "1"
 import sys
 from torch.utils.data import DataLoader
@@ -11,12 +13,16 @@ from torch.utils.tensorboard import SummaryWriter
 import time
 import segmentation_models_pytorch as smp
 from torchvision import datapoints as DP
-from evaluate import calculate_scores
+from actis.evaluate import calculate_scores
 from torchvision.transforms import InterpolationMode
 import argparse
 import toml
 
 torch.backends.cudnn.benchmark = True
+
+
+def supervised_training_cmdline(args):
+    supervised_training(args.param)
 
 
 def supervised_training(params):
@@ -44,8 +50,8 @@ def supervised_training(params):
     X_labeled, Y_labeled, X_unlabeled, X_val, Y_val_masks = prepare_data(params)  # BHW
     loss_weight = torch.Tensor([1.0, 1.0, 4.0]).to(device)
 
-    if 'Flywing' in params['data']:
-        print('Set interior to zero')
+    if 'Flywing' in str(params['data']):
+        get_logger().info('Set interior to zero')
         Y_labeled[Y_labeled == 1] = 0
 
     X_labeled, Y_labeled, X_unlabeled, X_val, Y_val = [
@@ -116,8 +122,7 @@ def supervised_training(params):
     os.makedirs(checkpoint_dir, exist_ok=True)
     writer = SummaryWriter(writer_dir)
 
-    with open(os.path.join(exp_dir, 'params.toml'), 'w') as f:
-        toml.dump(params, f)
+    params.to_toml(os.path.join(exp_dir, 'params.toml'))
 
     val_ap50 = []
     step = 0
@@ -158,7 +163,7 @@ def supervised_training(params):
             )
             ce_loss = ce_loss_img.mean()
             writer.add_scalar('ce_loss', ce_loss.item(), step)
-            print('step: ', step, 'ce_loss: ', ce_loss.cpu().item())
+            get_logger().info("step: %s ce_loss: %s " % (step, ce_loss.cpu().item()))
             ce_loss.backward()
             optimizer.step()
             scheduler.step()
@@ -190,15 +195,15 @@ def supervised_training(params):
                     out = out[..., padding:-padding, padding:-padding]
                     out_list += out.cpu().split(1)
                     gt_list += gt.squeeze(1).split(1)
-                metric_dict = calculate_scores(out_list, gt_list, "None")
+                metric_dict = calculate_scores(out_list, gt_list, "metric", base_path=params['base_dir'])  # todo: this creates a metric.toml and a metric.txt file - delibaretly?
 
                 val_ap50.append(metric_dict["ap_50"])
-                print("Validation:")
-                print(metric_dict)
+                get_logger().info("Validation:")
+                get_logger().info(metric_dict)
                 for key in metric_dict.keys():
                     writer.add_scalar(key, metric_dict[key], step)
                 if metric_dict["ap_50"] >= np.max(val_ap50):
-                    print('Save best model')
+                    get_logger().info('Save best model')
                     save_model(step, model, optimizer, metric_dict["ap_50"],
                                os.path.join(checkpoint_dir, "best_model.pth")
                                )
@@ -206,7 +211,7 @@ def supervised_training(params):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Supervised training')
-    parser.add_argument('--params', type=str, default="configs/params_supervised.toml", help='Path to params.toml file')
+    parser.add_argument('--params', type=str, default="configs/params_supervised.toml", help='Path to params.toml file')  # todo: change default
     args = parser.parse_args()
     params = toml.load(args.params)
     supervised_training(params)

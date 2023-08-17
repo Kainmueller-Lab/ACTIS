@@ -1,14 +1,15 @@
 """Input output functions for the project."""
+import errno
 import os
 import shutil
-import time
+import stat
+import sys
 from pathlib import Path
 from typing import List, Optional, Union
 
 import yaml  # type: ignore
 
-# Global variable to save program call time.
-CALL_TIME = None
+from actis.actis_logging import get_logger
 
 
 def write_dict_to_yml(yml_file: Union[str, Path], d: dict) -> bool:
@@ -93,21 +94,7 @@ def list_files_recursively(
     return files_list
 
 
-def get_doc_file_prefix() -> str:
-    """Get the time when the program was called.
 
-    Returns:
-        Time when the program was called.
-
-    """
-    global CALL_TIME
-
-    if not CALL_TIME:
-        CALL_TIME = time.strftime("%Y%m%d_%H-%M-%S")
-
-    call_time = CALL_TIME
-
-    return "run_%s" % call_time
 
 
 def copy(file: Union[str, Path], path_to: Union[str, Path]) -> Path:
@@ -132,3 +119,77 @@ def copy(file: Union[str, Path], path_to: Union[str, Path]) -> Path:
     create_path_recursively(path_to.parent)
 
     return Path(shutil.copy(file, path_to))
+
+
+def copy_folder(folder_to_copy, destination, copy_root_folder=True, force_copy=False):
+    """Copies a folder to a destination.
+
+    Args:
+        folder_to_copy:
+            The folder to copy
+        destination:
+            The destination folder to copy to
+        copy_root_folder:
+            boolean value. if true copies the root folder in the target destination.
+            Else all files in the folder to copy.
+        force_copy:
+            boolean value. If true, removes the destination folder before copying.
+
+    Returns:
+
+    """
+    folder_to_copy = Path(folder_to_copy)
+    destination = Path(destination)
+
+    if os.path.exists(destination) and os.path.samefile(folder_to_copy, destination):
+        return destination
+
+    if copy_root_folder:
+        destination = destination.joinpath(folder_to_copy.name)
+
+    if force_copy:
+        force_remove(destination)
+
+    create_path_recursively(destination)
+
+    for root, dirs, files in os.walk(folder_to_copy):
+        root = Path(root)
+
+        for d in dirs:
+            copy_folder(
+                root.joinpath(d), destination.joinpath(d), copy_root_folder=False
+            )
+        for fi in files:
+            copy(root.joinpath(fi), destination)
+        break
+
+    return destination
+
+
+def force_remove(path, warning=True):
+    path = Path(path)
+    if path.exists():
+        try:
+            if path.is_file():
+                try:
+                    path.unlink()
+                except PermissionError:
+                    handle_remove_readonly(os.unlink, path, sys.exc_info())
+            else:
+                shutil.rmtree(
+                    str(path), ignore_errors=False, onerror=handle_remove_readonly
+                )
+        except PermissionError as e:
+            get_logger().warn("Cannot delete %s." % str(path))
+            if not warning:
+                raise e
+
+
+def handle_remove_readonly(func, path, exc):
+    """Changes readonly flag of a given path."""
+    excvalue = exc[1]
+    if func in (os.rmdir, os.remove, os.unlink) and excvalue.errno == errno.EACCES:
+        os.chmod(path, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)  # 0777
+        func(path)
+    else:
+        raise

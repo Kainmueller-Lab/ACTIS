@@ -1,23 +1,42 @@
 import logging
 import sys
 from pathlib import Path
+import time
 
 import actis
-from actis.utils.io import get_doc_file_prefix
 
 LOGGER_NAME = actis.__name__
 
+# Global variable to save program call time.
+CALL_TIME = None
 
 def get_logger():
     return logging.getLogger(LOGGER_NAME)  # root logger
 
 
 def get_log_file(out_folder):
+    Path(out_folder).mkdir(parents=True, exist_ok=True)
     log_file = Path(out_folder).joinpath("%s.log" % get_doc_file_prefix())
     log_file.touch()
 
     return log_file
 
+
+def get_doc_file_prefix() -> str:
+    """Get the time when the program was called.
+
+    Returns:
+        Time when the program was called.
+
+    """
+    global CALL_TIME
+
+    if not CALL_TIME:
+        CALL_TIME = time.strftime("%Y%m%d_%H-%M-%S")
+
+    call_time = CALL_TIME
+
+    return "run_%s" % call_time
 
 def configure_logger(loglevel=None, logfile_name=None, formatter_string=None):
     logger = logging.getLogger(LOGGER_NAME)
@@ -59,7 +78,7 @@ def wandb_init(args):
     try:
         run = wandb.init(project=args.wandb_project, config=args.__dict__, sync_tensorboard=True, dir=args.log_out)
     except wandb.errors.UsageError:
-        print(
+        get_logger().error(
             "You chose to run the experiment logging to wandb.ai. Environment variable \"WANDB_API_KEY\" most"
             "likely not configured. Switch off wandb logging by specifying not passing --wandb to the call."
         )

@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -5,7 +8,6 @@ from skimage.segmentation import find_boundaries
 from torch.utils.data import Dataset
 from torchvision.transforms import v2 as transforms
 from torchvision.transforms.transforms import RandomApply, GaussianBlur, ColorJitter
-from unet import *
 
 
 def save_model(step, model, optimizer, loss, filename):
@@ -268,6 +270,14 @@ def onehot_encoding(lbl, n_classes=3, dtype=np.uint32):
 
 
 def prepare_data(params):
+    current_path = Path(os.path.dirname(os.path.realpath(__file__)))  # todo: relative path via pip isntallation does not have data folder
+    if str(params["data"]).endswith("Flywing"):
+        params["data"] = current_path.parent.parent.parent.joinpath("data", "Flywing_n0", "train", "train_data.npz")
+    if str(params["data"]).endswith("DSB2018"):
+        params["data"] = current_path.parent.parent.parent.joinpath("data", "DSB2018_n0", "train", "train_data.npz")
+    if str(params["data"]).endswith("Mouse"):
+        params["data"] = current_path.parent.parent.parent.joinpath("data", "Mouse_n0", "train", "train_data.npz")
+
     trainval_data = np.load(params['data'])
     train_images = trainval_data['X_train'].astype(np.float32)
     train_masks = trainval_data['Y_train']
@@ -297,6 +307,20 @@ def prepare_data(params):
 
 
 def prepare_test_data(params):
+    current_path = Path(os.path.dirname(os.path.realpath(__file__)))  # todo: relative path via pip isntallation does not have data folder
+    if "Flywing" in params["data"]:
+        params["test_data"] = str(
+            current_path.parent.parent.parent.joinpath("data", "Flywing_n0", "test", "test_data.npz")
+        )
+    if "DSB2018" in params["data"]:
+        params["test_data"] = str(
+            current_path.parent.parent.parent.joinpath("data", "DSB2018_n0", "test", "test_data.npz")
+        )
+    if "Mouse" in params["data"]:
+        params["test_data"] = str(
+            current_path.parent.parent.parent.joinpath("data", "Mouse_n0", "test", "test_data.npz")
+        )
+
     test_data = np.load(params['test_data'], allow_pickle=True)
     test_images = test_data["X_test"]
     test_masks = test_data["Y_test"]

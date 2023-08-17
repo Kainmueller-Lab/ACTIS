@@ -6,8 +6,8 @@ from typing import Callable
 import actis
 from actis.evaluate_experiment import evaluate
 from actis.actis_logging import get_log_file, get_logger, configure_logger, close_logger
-from actis.train_semi import train_semi
-from actis.train_supervised import train_supervised
+from actis.train_semi import semi_supervised_training, semi_supervised_training_cmdline
+from actis.train_supervised import supervised_training, supervised_training_cmdline
 from actis.utils.parameter import Parameter
 
 
@@ -30,26 +30,28 @@ def __run_subcommand(args, parser):
     log_file = get_log_file(args.log_out)
     configure_logger('INFO', logfile_name=log_file)
 
-
     get_logger().info("actis Version %s" % actis.__version__)
 
     if command == "train_semi" or command == "train_super":
         get_logger().debug("loading parameter file...")
         args.param = Parameter.from_toml(args.param)
+        get_logger().info(str(args.param))
 
     get_logger().debug("Running %s subcommand..." % command)
 
     args.func(args)  # execute entry point function
+
+    get_logger().info("Finished %s." % command)
 
     close_logger()
 
 
 def create_parser():
     """Creates the parser for the command line interface."""
-    parser = S3Parser()
+    parser = ActisParser()
 
     # train_semi action
-    p = parser.create_file_command_parser('train_semi', train_semi, '')
+    p = parser.create_file_command_parser('train_semi', semi_supervised_training_cmdline, '')
     p.add_argument(
         "--wandb", dest="wandb", action="store_true", default=False, required=False,
         help="Use weights and biases for the analysis. Environment variable \"WANDB_API_KEY\" has to be configured! "
@@ -60,7 +62,7 @@ def create_parser():
     )
 
     # train super action
-    p = parser.create_file_command_parser('train_super', train_supervised,
+    p = parser.create_file_command_parser('train_super', supervised_training_cmdline,
                                           'Train your network based on your parameters')
     p.add_argument(
         "--wandb", dest="wandb", action="store_true", default=False,
@@ -76,7 +78,11 @@ def create_parser():
         'evaluate', evaluate, 'Evaluate your experiment.'
     )
     p.add_argument("--experiment", type=str, default="exp_0_mouse_seed1_samples10_DINO_L1_loss_highLR")
+    p.add_argument("--base_dir", type=str, default="")
     p.add_argument("--checkpoint", type=str, default="best_model.pth")
+    p.add_argument("--tile_and_stitch", type=bool, default=False)
+    p.add_argument("--best_fg_thresh", type=float, default=None)
+    p.add_argument("--best_seed_thresh", type=float, default=None)
 
     return parser.parser
 
@@ -89,7 +95,7 @@ class ArgumentParser(argparse.ArgumentParser):
         self.exit(2, '%s: error: %s\n' % (self.prog, message))
 
 
-class S3Parser(ArgumentParser):
+class ActisParser(ArgumentParser):
     def __init__(self):
         super().__init__()
         self.parent_parser = self.create_parent_parser()
