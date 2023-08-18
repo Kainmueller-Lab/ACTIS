@@ -178,12 +178,12 @@ def supervised_training(params):
                 with h5py.File(os.path.join(snap_dir, 'snap_step_' + str(step) + '.hdf'), 'w') as f:
                     for key in list(out_dict.keys()):
                         f.create_dataset(key, data=out_dict[key].astype(np.float32))
-            if step % 10000 == 0:
+            if step % params['save_model_interval'] == 0:
                 # save model
                 save_model(step, model, optimizer, checkpoint_dir,
                            os.path.join(checkpoint_dir, 'model_step_' + str(step) + '.pth')
                            )
-            if step % 200 == 0:
+            if step % params['validation_interval'] == 0:
                 out_list = []
                 gt_list = []
                 padding = 16

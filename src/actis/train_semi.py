@@ -273,11 +273,11 @@ def semi_supervised_training(params):
                 for param_slow, param_fast in zip(slow_model.parameters(), model.parameters()):
                     param_slow = 0.99 * param_slow + 0.01 * param_fast
                     writer.add_scalar("semi_quantile", loss_fn_semi.quantile, step)
-            if step % 10000 == 0:
+            if step %  params['save_model_interval'] == 0:
                 # save model
                 save_model(step, model, optimizer, checkpoint_dir,
                            os.path.join(checkpoint_dir, 'model_step_' + str(step) + '.pth'))
-            if step % 200 == 0:
+            if step % params['validation_interval'] == 0:
                 out_list = []
                 out_list_slow = []
                 gt_list = []
