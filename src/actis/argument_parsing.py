@@ -83,6 +83,8 @@ def create_parser():
     p.add_argument("--tile_and_stitch", type=bool, default=False)
     p.add_argument("--best_fg_thresh", type=float, default=None)
     p.add_argument("--best_seed_thresh", type=float, default=None)
+    p.add_argument("--fg_thresh_linspace_num", type=int, default=90)
+    p.add_argument("--seed_thresh_linspace_num", type=int, default=90)
 
     return parser.parser
 

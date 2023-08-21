@@ -10,7 +10,15 @@ from actis.evaluate import calculate_scores
 from actis.utils.data import *
 
 
-def evaluate_experiment(experiment, base_dir="", checkpoint=None, tile_and_stitch=False, best_fg_thresh=None, best_seed_thresh=None):  # todo: tile_and_stitch argument not used
+def evaluate_experiment(
+        experiment, base_dir="",
+        checkpoint=None,
+        tile_and_stitch=False,
+        best_fg_thresh=None,
+        best_seed_thresh=None,
+        fg_thresh_linspace_num=90,
+        seed_thresh_linspace_num=90,
+):  # todo: tile_and_stitch argument not used
     """Evaluate an experiment. Writes evaluation metrics to disk.
 
     Args:
@@ -26,6 +34,10 @@ def evaluate_experiment(experiment, base_dir="", checkpoint=None, tile_and_stitc
             The best foreground threshold to use for evaluation. If None, the best foreground threshold is determined.
         best_seed_thresh:
             The best seed threshold to use for evaluation. If None, the best seed threshold is determined.
+        seed_thresh_linspace_num:
+            Number of seed thresholds to evaluate if best best_seed_thresh not given. Default is 90.
+        fg_thresh_linspace_num:
+            Number of foreground thresholds to evaluate if best_fg_thresh not given. Default is 90.
 
     """
     params_path = os.path.join(base_dir, "experiments", experiment, "params.toml")
@@ -112,7 +124,7 @@ def evaluate_experiment(experiment, base_dir="", checkpoint=None, tile_and_stitc
 
     # optimize fg_thresh
     if not best_fg_thresh:
-        fg_threshs = np.linspace(0.1, 0.99, 90)
+        fg_threshs = np.linspace(0.1, 0.99, fg_thresh_linspace_num)
         seed_thresh = 0.6
         all_scores = {
             'fg_thresh': [],
@@ -136,7 +148,7 @@ def evaluate_experiment(experiment, base_dir="", checkpoint=None, tile_and_stitc
 
     # optimize seed_thresh
     if not best_seed_thresh:
-        seed_threshs = np.linspace(0.1, 0.99, 90)
+        seed_threshs = np.linspace(0.1, 0.99, seed_thresh_linspace_num)
         fg_thresh = best_fg_thresh
         all_scores = {key: [] for key in all_scores.keys()}
         for seed_thresh in seed_threshs:
@@ -194,7 +206,9 @@ def evaluate(args):
         args.checkpoint,
         args.tile_and_stitch,
         args.best_fg_thresh,
-        args.best_seed_thresh
+        args.best_seed_thresh,
+        args.fg_thresh_linspace_num,
+        args.seed_thresh_linspace_num,
     )
 
 
@@ -207,6 +221,9 @@ if __name__ == '__main__':
     args.add_argument("--tile_and_stitch", type=bool, default=False)
     args.add_argument("--best_fg_thresh", type=float, default=None)
     args.add_argument("--best_seed_thresh", type=float, default=None)
+    args.add_argument("--fg_thresh_linspace_num", type=int, default=90)
+    args.add_argument("--seed_thresh_linspace_num", type=int, default=90)
+
     args = args.parse_args()
 
     # evaluate the model

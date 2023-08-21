@@ -99,6 +99,8 @@ class TestIntegrationSuite:
             "--base_dir=%s" % str(tmp_path),
             "--experiment=myexperiment",
             "--checkpoint=best_model.pth",
+            "--fg_thresh_linspace_num=2",
+            "--seed_thresh_linspace_num=2",
             "--log-out=%s" % str(tmp_path.joinpath("log")),
         ]
 
