@@ -3,11 +3,15 @@ message: "If you use this software, please cite it as below."
 authors:
   - family-names: Rumberger
     given-names: Lorenz
+  - family-names: Franzen
+    given-names: Jannik
+  - family-names: Hirsch
+    given-names: Peter
   - family-names: Albrecht
     given-names: Jan Philipp
     orcid: https://orcid.org/0000-0002-3792-9695
-  - family-names: Franzen
-    given-names: Jannik
+  - family-names: Kainmueller
+    given-names: Dagmar
 title: "ACTIS"
 abstract: Augmentation Consistency Training for Instance Segmentation.
 license: MIT

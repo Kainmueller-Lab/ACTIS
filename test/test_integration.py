@@ -39,6 +39,7 @@ def train_supervised():
     params["base_dir"] = str(tmp_path)
     params["training_steps"] = 10
     params["validation_interval"] = 10
+    params["num_workers"] = 0
 
     # write parameters to file
     with open(tmp_path.joinpath("test_train_super.toml"), "w") as f:
@@ -75,6 +76,7 @@ class TestIntegrationSuite:
         params["training_steps"] = 24  # todo: can't be < 24
         params["base_dir"] = str(tmp_path)
         params["validation_interval"] = 12
+        params["num_workers"] = 0
         params["checkpoint_path"] = str(
             tmp_path.joinpath("experiments", "myexperiment", "train", "checkpoints", "best_model.pth"))
 
