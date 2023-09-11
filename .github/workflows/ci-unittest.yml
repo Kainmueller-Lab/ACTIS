@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build_linux:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     strategy:
       matrix:
         python-version: ["3.11"]
@@ -34,7 +34,7 @@ jobs:
           actis -h
 
   test_integration:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     strategy:
       matrix:
         python-version: ["3.11"]
