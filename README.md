@@ -91,5 +91,3 @@ To evaluate any trained model call the following command:
 
 Please use the citation method from the [CITATION.cff](CITATION.cff) file!
 You can copy it from the "ABOUT" section of your repository.
-
-The link to the paper will be announced soon.
