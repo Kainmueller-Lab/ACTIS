@@ -12,10 +12,23 @@ authors:
     orcid: https://orcid.org/0000-0002-3792-9695
   - family-names: Kainmueller
     given-names: Dagmar
-title: "ACTIS"
-abstract: Augmentation Consistency Training for Instance Segmentation.
+title: "ACTIS Improving data efficiency by leveraging semi-supervised Augmentation Consistency Training for Instance Segmentation"
+abstract: Segmenting objects like cells or nuclei in biomedical microscopy data is a standard task required for many downstream analyses. However, existing pre-trained models are
+continuously challenged by ever-evolving experimental setups and imaging platforms. On the other hand, training
+new models still requires a considerable number of annotated samples, rendering it infeasible for small to midsized experiments. To address this challenge, we propose
+a semi-supervised learning approach for instance segmentation that leverages a small number of annotated samples together with a larger number of unannotated samples. Our pipeline, Augmentation Consistency Training
+for Instance Segmentation (ACTIS), incorporates methods from consistency regularization and entropy minimization. In addition, we introduce a robust confidence-based
+loss masking scheme which we find empirically to work
+well on highly imbalanced class frequencies. We show
+that our model can surpass the performance of supervised
+models trained on more than twice as much annotated
+data. It achieves state-of-the-art results on three benchmark
+datasets in the biomedical domain, demonstrating its effectiveness for semi-supervised instance segmentation.
 license: MIT
 version: 0.1.0
 date-released: 2023-06-21
 repository: "https://github.com/Kainmueller-Lab/ACTIS.git"
 type: software
+identifiers:
+  - type: doi
+    value: 10.1109/ICCVW60793.2023.00410
