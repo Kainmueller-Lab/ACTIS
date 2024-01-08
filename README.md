@@ -2,7 +2,7 @@
 
 Welcome to ACTIS - Augmentation Consistency Training for Instance Segmentation.
 
-Feel free to checkout our method:
+Feel free to checkout our method: [ACTIS paper](https://openaccess.thecvf.com/content/ICCV2023W/BIC/papers/Rumberger_ACTIS_Improving_Data_Efficiency_by_Leveraging_Semi-Supervised_Augmentation_Consistency_Training_ICCVW_2023_paper.pdf)
 
 ![](docs/method.png)
 
